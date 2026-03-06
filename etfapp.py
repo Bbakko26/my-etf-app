@@ -206,16 +206,39 @@ try:
             cat_total_eval = cat_df['평가금액'].sum()
             cat_total_buy = cat_df['매수금액'].sum()
             cat_profit_rate = ((cat_total_eval - cat_total_buy) / cat_total_buy) * 100 if cat_total_buy != 0 else 0
+            
             st.markdown(f"#### 📌 {cat} (평가: {cat_total_eval:,.0f}원 / 수익: {cat_profit_rate:+.2f}%)")
             
-            c_left, c_right = st.columns([1, 2])
+            # 1. 컬럼 비율 조정 (기존 [1, 2] -> [1.2, 1.8]로 차트 공간 확보)
+            c_left, c_right = st.columns([1.2, 1.8]) 
+            
             with c_left:
                 cat_sum = cat_df.groupby('약식종목명')['평가금액'].sum().reset_index()
-                st.plotly_chart(px.pie(cat_sum, values='평가금액', names='약식종목명', hole=0.5).update_layout(showlegend=False, height=200), use_container_width=True)
+                
+                # 2. 도넛 차트 생성 및 속성 변경
+                fig_cat = px.pie(cat_sum, values='평가금액', names='약식종목명', hole=0.5)
+                
+                # 3. 상세 레이아웃 조정 (높이를 200 -> 350으로 대폭 확대, 마진 제거)
+                fig_cat.update_layout(
+                    showlegend=True,          # 차트가 커지므로 범례를 다시 표시해도 좋습니다
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5), # 범례 하단 배치
+                    height=350,               # 높이 확대
+                    margin=dict(l=10, r=10, t=10, b=10) # 여백 최소화로 꽉 차게 표시
+                )
+                
+                # 4. 차트 내부 텍스트 스타일 (선택 사항)
+                fig_cat.update_traces(textposition='inside', textinfo='percent+label')
+                
+                st.plotly_chart(fig_cat, use_container_width=True)
+                
             with c_right:
                 cat_df['비중'] = (cat_df['평가금액'] / cat_total_eval) * 100
                 cat_df['수익률'] = ((cat_df['평가금액'] - cat_df['매수금액']) / cat_df['매수금액']) * 100
-                st.table(cat_df[['계좌명', '약식종목명', '평가금액', '비중', '수익률']].rename(columns={'약식종목명':'종목', '평가금액':'평가액'}).style.hide(axis='index').format({
+                
+                # 테이블 높이를 차트와 맞추기 위해 상단 여백 약간 추가 가능
+                st.table(cat_df[['계좌명', '약식종목명', '평가금액', '비중', '수익률']].rename(
+                    columns={'약식종목명':'종목', '평가금액':'평가액'}
+                ).style.hide(axis='index').format({
                     '평가액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.2f}%'
                 }))
             st.markdown("---")
