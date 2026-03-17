@@ -42,18 +42,16 @@ try:
                 current_price_map[code], change_rate_map[code] = 1.0, 0.0
                 continue
             try:
-                price_history = fdr.DataReader(code).tail(2)
+                price_history = fdr.DataReader(code).tail(130)
                 if len(price_history) >= 2:
                     curr_p = price_history['Close'].iloc[-1]
                     prev_p = price_history['Close'].iloc[-2]
                     chg_r = ((curr_p - prev_p) / prev_p) * 100
                     current_price_map[code], change_rate_map[code] = curr_p, chg_r
-                else:
-                    current_price_map[code], change_rate_map[code] = price_history['Close'].iloc[-1], 0.0
             except:
                 current_price_map[code], change_rate_map[code] = 0.0, 0.0
 
-    # 기본 계산 로직 (에러 방지를 위해 원본 데이터 유지)
+    # 기본 계산
     df['현재가'] = df['종목코드'].map(current_price_map)
     df['매수금액'] = df.apply(lambda x: x['보유수량'] if x['종목코드'].upper() == 'CASH' else x['보유수량'] * x['매수평단'], axis=1)
     df['평가금액'] = df['보유수량'] * df['현재가']
@@ -63,7 +61,7 @@ try:
     total_buy = df['매수금액'].sum()
     total_profit_amt = total_eval_sum - total_buy
 
-    # 📍 급락 알람
+    # 급락 알림
     alert_list = [f"{df[df['종목코드']==c]['약식종목명'].iloc[0]}({r:.1f}%)" for c, r in change_rate_map.items() if r <= -2.5]
     if alert_list:
         st.error(f"📉 급락: {', '.join(alert_list)}")
@@ -74,19 +72,15 @@ try:
     c2.metric("총 평가", f"{total_eval_sum:,.0f}원")
     c3.metric("수익률", f"{(total_profit_amt/total_buy*100) if total_buy!=0 else 0:.2f}%", f"{total_profit_amt:+,.0f}원")
 
-    tab1, tab2, tab_cat, tab3 = st.tabs(["📊 상세", "🍩 비중", "🏦 분석", "💼 전체"])
+    tab1, tab2, tab_cat, tab3 = st.tabs(["📊 종목 상세", "🍩 종합 비중", "🏦 카테고리 분석", "💼 전체 계좌"])
 
-    # 📍 테이블 표시용 헬퍼 함수 (현금 칸 비우기 + 에러 방지)
     def make_display_table(target_df, cols):
         display_df = target_df.copy()
-        # 현금일 경우 표시만 '-'로 대체
         is_cash = display_df['종목코드'].str.upper() == 'CASH'
         for col in ['보유수량', '매수평단', '현재가']:
             if col in display_df.columns:
                 display_df[col] = display_df[col].astype(object)
                 display_df.loc[is_cash, col] = "-"
-        
-        # 요청된 컬럼 순서로 반환 및 이름 변경
         rename_dict = {'약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액'}
         return display_df[cols].rename(columns=rename_dict)
 
@@ -99,10 +93,26 @@ try:
         daily_chg = change_rate_map.get(target_df['종목코드'].iloc[0], 0.0)
         st.markdown(f"**{target_df['약식종목명'].iloc[0]}** <span style='color:{'#d32f2f' if daily_chg > 0 else '#1976d2'}; font-size:12px;'>({daily_chg:+.2f}%)</span>", unsafe_allow_html=True)
         
-        # 📍 계좌명 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
         disp_tab1 = make_display_table(target_df.sort_values(by='평가금액', ascending=False), 
                                       ['계좌명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
         st.dataframe(disp_tab1.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
+
+        stock_code = target_df['종목코드'].iloc[0]
+        if stock_code.upper() != 'CASH':
+            try:
+                stock_h = fdr.DataReader(stock_code)
+                start_date = datetime.now() - timedelta(days=120)
+                plot_data = stock_h[stock_h.index >= start_date]
+                fig = go.Figure(data=[go.Candlestick(x=plot_data.index, open=plot_data['Open'], high=plot_data['High'], low=plot_data['Low'], close=plot_data['Close'], 
+                                                     increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
+                avg_p = target_df['매수금액'].sum() / target_df['보유수량'].sum() if target_df['보유수량'].sum() != 0 else 0
+                fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text="내 평단")
+                fig.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False)
+                st.plotly_chart(fig, use_container_width=True)
+            except:
+                st.warning("⚠️ 차트 데이터를 불러올 수 없습니다.")
+        else:
+            st.info("💡 현금 자산은 차트를 제공하지 않습니다.")
 
     # --- 2. 종목 비중 ---
     with tab2:
@@ -113,26 +123,31 @@ try:
         sum_df['비중'] = (sum_df['평가금액'] / total_eval_sum) * 100
         
         st.plotly_chart(px.pie(sum_df, values='평가금액', names='약식종목명', hole=0.4).update_traces(textinfo='percent'), use_container_width=True)
-        
-        # 📍 종목 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
-        disp_tab2 = make_display_table(sum_df.sort_values(by='비중', ascending=False), 
-                                      ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
+        disp_tab2 = make_display_table(sum_df.sort_values(by='비중', ascending=False), ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
         st.dataframe(disp_tab2.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
-    # --- 3. 카테고리 분석 ---
+    # --- 3. 카테고리 분석 (계좌명 제거) ---
     with tab_cat:
         cat_order = ["세액공제 O", "세액공제 X", "ISA"]
         for cat in [c for c in cat_order if c in df['계좌카테고리'].unique()]:
             cat_df = df[df['계좌카테고리'] == cat].copy()
             st.markdown(f"**📌 {cat}**")
-            fig = px.pie(cat_df, values='평가금액', names='약식종목명', hole=0.5)
-            fig.update_layout(showlegend=True, height=280, legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"))
-            st.plotly_chart(fig, use_container_width=True)
             
-            # 📍 계좌명 - 종목 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
-            disp_tab_cat = make_display_table(cat_df.sort_values(by='평가금액', ascending=False), 
-                                             ['계좌명', '약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
+            # 카테고리 내 종목별 합산 (계좌 구분 없이 종목별로 묶음)
+            cat_sum = cat_df.groupby(['약식종목명', '종목코드']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
+            cat_sum['매수평단'] = cat_sum['매수금액'] / cat_sum['보유수량']
+            cat_sum['현재가'] = cat_sum['종목코드'].map(current_price_map)
+            cat_sum['수익률'] = ((cat_sum['평가금액'] - cat_sum['매수금액']) / cat_sum['매수금액'] * 100).fillna(0)
+            
+            fig_p = px.pie(cat_sum, values='평가금액', names='약식종목명', hole=0.5)
+            fig_p.update_layout(showlegend=True, height=280, legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"))
+            st.plotly_chart(fig_p, use_container_width=True)
+            
+            # 📍 계좌명 제외: 종목 - 수량 - 평단 - 현재가 - 평가액 - 수익률
+            disp_tab_cat = make_display_table(cat_sum.sort_values(by='평가금액', ascending=False), 
+                                             ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
             st.dataframe(disp_tab_cat.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
+            st.markdown("---")
 
     # --- 4. 전체 계좌 ---
     with tab3:
@@ -140,10 +155,7 @@ try:
         for acc in [a for a in fixed_order if a in df['계좌명'].unique()]:
             st.markdown(f"🏦 **{acc}**")
             acc_df = df[df['계좌명'] == acc].copy()
-            
-            # 📍 종목 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
-            disp_tab3 = make_display_table(acc_df.sort_values(by='평가금액', ascending=False), 
-                                          ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
+            disp_tab3 = make_display_table(acc_df.sort_values(by='평가금액', ascending=False), ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
             st.dataframe(disp_tab3.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
 except Exception as e:
