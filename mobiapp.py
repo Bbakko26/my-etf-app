@@ -14,34 +14,20 @@ def load_data():
     df['종목코드'] = df['종목코드'].fillna('CASH').str.strip()
     if '약식종목명' not in df.columns:
         df['약식종목명'] = df['종목명']
+    if '계좌카테고리' not in df.columns:
+        df['계좌카테고리'] = '미지정'
     return df
 
 st.set_page_config(page_title="통합 자산 관리", layout="wide")
 
-# 📍 폰트 및 모바일 최적화 스타일 (이 부분을 교체하세요)
+# 모바일 최적화 CSS
 st.markdown("""
     <style>
-    /* 전체 폰트 크기 하향 조정 */
     html, body, [class*="css"] { font-size: 12px !important; }
-    
-    /* 제목(Title) 크기 대폭 축소 */
-    h1 { font-size: 1.2rem !important; padding-bottom: 10px !important; }
-    h4 { font-size: 1.0rem !important; margin-top: 10px !important; }
-
-    /* 메인 지표(Metric) 크기 축소 - 모바일에서 안 깨지게 */
+    h1 { font-size: 1.2rem !important; }
     [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-    [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
-    [data-testid="stMetricDelta"] { font-size: 0.75rem !important; }
-
-    /* 테이블 내 텍스트 정렬 및 크기 */
     .stDataFrame div { font-size: 11px !important; }
-    
-    /* 모바일에서 탭 메뉴가 잘 보이도록 간격 조정 */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { height: 40px; white-space: nowrap; font-size: 12px !important; }
-
-    /* 불필요한 여백 제거 */
-    .main .block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+    .main .block-container { padding-top: 1.5rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -67,6 +53,7 @@ try:
             except:
                 current_price_map[code], change_rate_map[code] = 0.0, 0.0
 
+    # 기본 계산 로직 (에러 방지를 위해 원본 데이터 유지)
     df['현재가'] = df['종목코드'].map(current_price_map)
     df['매수금액'] = df.apply(lambda x: x['보유수량'] if x['종목코드'].upper() == 'CASH' else x['보유수량'] * x['매수평단'], axis=1)
     df['평가금액'] = df['보유수량'] * df['현재가']
@@ -76,13 +63,12 @@ try:
     total_buy = df['매수금액'].sum()
     total_profit_amt = total_eval_sum - total_buy
 
-    # 📍 모바일 알람 텍스트 크기 조정
+    # 📍 급락 알람
     alert_list = [f"{df[df['종목코드']==c]['약식종목명'].iloc[0]}({r:.1f}%)" for c, r in change_rate_map.items() if r <= -2.5]
     if alert_list:
         st.error(f"📉 급락: {', '.join(alert_list)}")
 
     st.title("💰 통합 자산 포트폴리오")
-    
     c1, c2, c3 = st.columns(3)
     c1.metric("총 매수", f"{total_buy:,.0f}원")
     c2.metric("총 평가", f"{total_eval_sum:,.0f}원")
@@ -90,9 +76,19 @@ try:
 
     tab1, tab2, tab_cat, tab3 = st.tabs(["📊 상세", "🍩 비중", "🏦 분석", "💼 전체"])
 
-    def apply_cash_null(row):
-        if row['종목코드'].upper() == 'CASH': return None, None, None
-        return row['보유수량'], row['매수평단'], row['현재가']
+    # 📍 테이블 표시용 헬퍼 함수 (현금 칸 비우기 + 에러 방지)
+    def make_display_table(target_df, cols):
+        display_df = target_df.copy()
+        # 현금일 경우 표시만 '-'로 대체
+        is_cash = display_df['종목코드'].str.upper() == 'CASH'
+        for col in ['보유수량', '매수평단', '현재가']:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].astype(object)
+                display_df.loc[is_cash, col] = "-"
+        
+        # 요청된 컬럼 순서로 반환 및 이름 변경
+        rename_dict = {'약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액'}
+        return display_df[cols].rename(columns=rename_dict)
 
     # --- 1. 상세 현황 ---
     with tab1:
@@ -101,24 +97,27 @@ try:
         target_df = df[df['종목명'] == selected_stock].copy()
         
         daily_chg = change_rate_map.get(target_df['종목코드'].iloc[0], 0.0)
-        chg_color = '#d32f2f' if daily_chg > 0 else '#1976d2'
-        st.markdown(f"**{target_df['약식종목명'].iloc[0]}** <span style='color:{chg_color}; font-size:12px;'>({daily_chg:+.2f}%)</span>", unsafe_allow_html=True)
+        st.markdown(f"**{target_df['약식종목명'].iloc[0]}** <span style='color:{'#d32f2f' if daily_chg > 0 else '#1976d2'}; font-size:12px;'>({daily_chg:+.2f}%)</span>", unsafe_allow_html=True)
         
-        target_df[['표시수량', '표시평단', '표시현재가']] = target_df.apply(apply_cash_null, axis=1, result_type='expand')
-        st.dataframe(target_df.sort_values(by='평가금액', ascending=False)[['계좌명', '표시수량', '표시평단', '표시현재가', '평가금액', '수익률']].rename(columns={'표시수량':'수량', '표시평단':'평단', '표시현재가':'현재가', '평가금액':'평가액'}).style.format({
-            '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '수익률': '{:.2f}%'
-        }, na_rep="-"), use_container_width=True, hide_index=True)
+        # 📍 계좌명 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
+        disp_tab1 = make_display_table(target_df.sort_values(by='평가금액', ascending=False), 
+                                      ['계좌명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
+        st.dataframe(disp_tab1.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
     # --- 2. 종목 비중 ---
     with tab2:
         sum_df = df.groupby(['약식종목명', '종목코드']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
+        sum_df['매수평단'] = sum_df['매수금액'] / sum_df['보유수량']
+        sum_df['현재가'] = sum_df['종목코드'].map(current_price_map)
+        sum_df['수익률'] = ((sum_df['평가금액'] - sum_df['매수금액']) / sum_df['매수금액'] * 100).fillna(0)
         sum_df['비중'] = (sum_df['평가금액'] / total_eval_sum) * 100
+        
         st.plotly_chart(px.pie(sum_df, values='평가금액', names='약식종목명', hole=0.4).update_traces(textinfo='percent'), use_container_width=True)
         
-        sum_df[['표시수량', '표시평단', '표시현재가']] = sum_df.apply(lambda r: (None, None, None) if r['종목코드'] == 'CASH' else (r['보유수량'], r['매수금액']/r['보유수량'], current_price_map.get(r['종목코드'])), axis=1, result_type='expand')
-        st.dataframe(sum_df.sort_values(by='비중', ascending=False)[['약식종목명', '표시수량', '표시평단', '표시현재가', '평가금액', '수익률']].rename(columns={'약식종목명':'종목', '표시수량':'수량', '표시평단':'평단', '표시현재가':'현재가', '평가금액':'평가액'}).style.format({
-            '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '수익률': '{:.2f}%'
-        }, na_rep="-"), use_container_width=True, hide_index=True)
+        # 📍 종목 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
+        disp_tab2 = make_display_table(sum_df.sort_values(by='비중', ascending=False), 
+                                      ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
+        st.dataframe(disp_tab2.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
     # --- 3. 카테고리 분석 ---
     with tab_cat:
@@ -127,13 +126,13 @@ try:
             cat_df = df[df['계좌카테고리'] == cat].copy()
             st.markdown(f"**📌 {cat}**")
             fig = px.pie(cat_df, values='평가금액', names='약식종목명', hole=0.5)
-            fig.update_layout(showlegend=True, height=280, legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center"), margin=dict(t=10, b=10))
+            fig.update_layout(showlegend=True, height=280, legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"))
             st.plotly_chart(fig, use_container_width=True)
             
-            cat_df[['표시수량', '표시평단', '표시현재가']] = cat_df.apply(apply_cash_null, axis=1, result_type='expand')
-            st.dataframe(cat_df.sort_values(by='평가금액', ascending=False)[['계좌명', '약식종목명', '표시수량', '표시평단', '표시현재가', '평가금액', '수익률']].rename(columns={'약식종목명':'종목', '표시수량':'수량', '표시평단':'평단', '표시현재가':'현재가', '평가금액':'평가액'}).style.format({
-                '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '수익률': '{:.2f}%'
-            }, na_rep="-"), use_container_width=True, hide_index=True)
+            # 📍 계좌명 - 종목 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
+            disp_tab_cat = make_display_table(cat_df.sort_values(by='평가금액', ascending=False), 
+                                             ['계좌명', '약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
+            st.dataframe(disp_tab_cat.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
     # --- 4. 전체 계좌 ---
     with tab3:
@@ -141,10 +140,11 @@ try:
         for acc in [a for a in fixed_order if a in df['계좌명'].unique()]:
             st.markdown(f"🏦 **{acc}**")
             acc_df = df[df['계좌명'] == acc].copy()
-            acc_df[['표시수량', '표시평단', '표시현재가']] = acc_df.apply(apply_cash_null, axis=1, result_type='expand')
-            st.dataframe(acc_df.sort_values(by='평가금액', ascending=False)[['약식종목명', '표시수량', '표시평단', '표시현재가', '평가금액', '수익률']].rename(columns={'약식종목명':'종목', '표시수량':'수량', '표시평단':'평단', '표시현재가':'현재가', '평가금액':'평가액'}).style.format({
-                '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '수익률': '{:.2f}%'
-            }, na_rep="-"), use_container_width=True, hide_index=True)
+            
+            # 📍 종목 - 수량 - 평단 - 현재가 - 평가액 - 수익률 (비중순 정렬)
+            disp_tab3 = make_display_table(acc_df.sort_values(by='평가금액', ascending=False), 
+                                          ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'])
+            st.dataframe(disp_tab3.style.format({'평가액': '{:,.0f}', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
 except Exception as e:
-    st.error(f"⚠️ 오류: {e}")
+    st.error(f"⚠️ 오류 발생: {e}")
