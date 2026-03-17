@@ -72,7 +72,7 @@ try:
     c2.metric("총 평가", f"{total_eval_sum:,.0f}원")
     c3.metric("수익률", f"{(total_profit_amt/total_buy*100) if total_buy!=0 else 0:.2f}%", f"{total_profit_amt:+,.0f}원")
 
-    tab1, tab2, tab_cat, tab3 = st.tabs(["📊 상세", "🍩 비중", "🏦 분석", "💼 전체"])
+    tab1, tab2, tab_cat, tab3 = st.tabs(["📊종목상세", "🍩전체비중", "🏦카테고리 분석", "💼 계좌별 비중"])
 
     # 안전한 포맷팅 함수
     def safe_format(val, fmt="{:,.0f}"):
@@ -147,7 +147,7 @@ try:
             fig_p = px.pie(cat_sum, values='평가금액', names='약식종목명', hole=0.5)
             fig_p.update_layout(
                 showlegend=True, 
-                height=450, # 📍 높이 확대
+                height=350, # 📍 높이 확대
                 legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center"),
                 margin=dict(l=10, r=10, t=30, b=50) # 📍 여백 조정
             )
