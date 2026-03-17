@@ -117,7 +117,7 @@ try:
                 fig.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
             except: st.warning("⚠️ 차트 실패")
-        else: st.info("💡 현금 차트 미제공")
+        else: st.info("💡 현금은 차트가 없습니다.")
 
     # --- 2. 종목 비중 ---
     with tab2:
