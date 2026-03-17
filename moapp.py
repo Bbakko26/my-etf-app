@@ -3,6 +3,7 @@ import pandas as pd
 import FinanceDataReader as fdr
 import plotly.graph_objects as go
 import plotly.express as px
+from datetime import datetime, timedelta
 
 # 1. 데이터 불러오기
 def load_data():
@@ -10,145 +11,165 @@ def load_data():
         df = pd.read_csv('my_assets.csv', encoding='utf-8-sig', dtype={'종목코드': str})
     except:
         df = pd.read_csv('my_assets.csv', encoding='cp949', dtype={'종목코드': str})
-    df['종목코드'] = df['종목코드'].str.strip()
+    
+    df['종목코드'] = df['종목코드'].fillna('CASH').str.strip()
     if '약식종목명' not in df.columns:
         df['약식종목명'] = df['종목명']
+    if '계좌카테고리' not in df.columns:
+        df['계좌카테고리'] = '미지정'
     return df
 
-# 모바일 최적화 스타일 설정
-st.set_page_config(page_title="ETF Manager", layout="wide")
+# 스타일 설정
+st.set_page_config(page_title="통합 자산 관리 시스템", layout="wide")
 st.markdown("""
     <style>
     h1 { font-size: 1.5rem !important; white-space: nowrap; }
     html, body, [class*="css"] { font-size: 13px !important; }
-    .stTable td, .stTable th { font-size: 11px !important; padding: 3px !important; }
-    [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
-    /* 각주 스타일: 한 줄에 하나씩 정렬 */
-    .footnote-item { 
-        font-size: 11px; 
-        color: #666; 
-        margin-bottom: 2px;
-        line-height: 1.4;
-    }
+    .up-color { color: #d32f2f; font-weight: bold; }
+    .down-color { color: #1976d2; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
 try:
     df = load_data()
     
-    # 실시간 시세 반영
     unique_codes = df['종목코드'].unique()
     current_price_map = {}
-    with st.spinner('시세 반영 중...'):
+    change_rate_map = {}
+    
+    with st.spinner('실시간 시세 반영 중...'):
         for code in unique_codes:
-            price_data = fdr.DataReader(code).iloc[-1]
-            current_price_map[code] = price_data['Close']
+            if code == 'CASH' or code == '' or pd.isna(code):
+                current_price_map[code] = 1.0
+                change_rate_map[code] = 0.0
+                continue
+            try:
+                price_history = fdr.DataReader(code).tail(2)
+                if len(price_history) >= 2:
+                    current_price = price_history['Close'].iloc[-1]
+                    prev_price = price_history['Close'].iloc[-2]
+                    change_rate = ((current_price - prev_price) / prev_price) * 100
+                else:
+                    current_price = price_history['Close'].iloc[-1]
+                    change_rate = 0.0
+                current_price_map[code] = current_price
+                change_rate_map[code] = change_rate
+            except:
+                current_price_map[code] = 0
+                change_rate_map[code] = 0
 
+    # 금액 및 수익률 계산
     df['현재가'] = df['종목코드'].map(current_price_map)
-    df['매수금액'] = df['보유수량'] * df['매수평단']
+    df['매수금액'] = df.apply(lambda x: x['보유수량'] if x['종목코드'] == 'CASH' else x['보유수량'] * x['매수평단'], axis=1)
     df['평가금액'] = df['보유수량'] * df['현재가']
+    df['수익률'] = df.apply(lambda x: 0.0 if x['종목코드'] == 'CASH' else ((x['평가금액'] - x['매수금액']) / x['매수금액'] * 100 if x['매수금액'] != 0 else 0), axis=1)
     
     total_eval_sum = df['평가금액'].sum()
 
-    # 1. 상단 요약
-    st.title("💰 통합 ETF 포트폴리오")
+    st.title("💰 통합 자산 포트폴리오")
+    
+    # 급락 알림
+    alert_list = [f"**[{df[df['종목코드']==c]['약식종목명'].iloc[0]}]** ({r:.2f}%)" for c, r in change_rate_map.items() if r <= -2.5]
+    if alert_list:
+        st.error(f"⚠️ **급락 주의:** 현재 {' | '.join(alert_list)} 종목이 -2.5% 이상 하락 중입니다.")
+
     total_buy = df['매수금액'].sum()
     total_profit_amt = total_eval_sum - total_buy
-    total_profit_rate = (total_profit_amt / total_buy) * 100
+    total_profit_rate = (total_profit_amt / total_buy) * 100 if total_buy != 0 else 0
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("총 매수", f"{total_buy:,.0f}")
-    c2.metric("총 평가", f"{total_eval_sum:,.0f}")
-    c3.metric("수익률", f"{total_profit_rate:.2f}%", f"{total_profit_amt:+,.0f}원")
+    c1.metric("총 매수", f"{total_buy:,.0f}원")
+    c2.metric("총 평가", f"{total_eval_sum:,.0f}원")
+    c3.metric("누적 수익률", f"{total_profit_rate:.2f}%", f"{total_profit_amt:+,.0f}원")
 
     st.markdown("---")
+    tab1, tab2, tab_cat, tab3 = st.tabs(["📊 상세 현황", "🍩 종목 비중", "🏦 카테고리 분석", "💼 전체 계좌"])
 
-    # 2. 종목 선택
-    sort_ref = df.groupby('종목명')['평가금액'].sum().sort_values(ascending=False).index.tolist()
-    name_map = df.set_index('종목명')['약식종목명'].to_dict()
-    selected_stock = st.selectbox("📂 종목 선택", sort_ref)
-    
-    target_df = df[df['종목명'] == selected_stock].copy()
-    target_df['수익률'] = ((target_df['평가금액'] - target_df['매수금액']) / target_df['매수금액']) * 100
-    
-    total_qty = target_df['보유수량'].sum()
-    total_buy_amt = target_df['매수금액'].sum()
-    total_eval_amt = target_df['평가금액'].sum()
-    avg_price = total_buy_amt / total_qty
-    stock_profit_rate = ((total_eval_amt - total_buy_amt) / total_buy_amt) * 100
-    stock_weight = (total_eval_amt / total_eval_sum) * 100
-
-    # 3. 탭 구성
-    tab1, tab2, tab3 = st.tabs(["📊 상세 현황", "🍩 자산 비중", "🏦 전체 계좌"])
-
+    # --- TAB 1: 상세 현황 ---
     with tab1:
-        st.write(f"📍 **{name_map.get(selected_stock)} 통합 성적**")
-        summary_data = pd.DataFrame([{
-            '수량': total_qty, '평단': avg_price, '현재가': target_df['현재가'].iloc[0], 
-            '평가액': total_eval_amt, '비중': stock_weight, '수익률': stock_profit_rate
-        }])
-        st.table(summary_data.style.hide(axis='index').format({
-            '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', 
-            '평가액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.1f}%'
-        }))
+        sort_ref = df.groupby('종목명')['평가금액'].sum().sort_values(ascending=False).index.tolist()
+        selected_stock = st.selectbox("📂 종목 선택", sort_ref)
+        target_df = df[df['종목명'] == selected_stock].copy()
         
-        st.write("계좌별 내역")
-        acc_detail = target_df.sort_values(by='평가금액', ascending=False)
-        st.table(acc_detail[['계좌명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']].rename(
-            columns={'보유수량':'수량', '매수평단':'평단', '평가금액':'평가액'}
-        ).style.hide(axis='index').format({
-            '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '수익률': '{:.1f}%'
-        }))
+        daily_change = change_rate_map.get(target_df['종목코드'].iloc[0], 0.0)
+        c_style = "up-color" if daily_change > 0 else "down-color" if daily_change < 0 else ""
+        st.markdown(f"📍 **{target_df['약식종목명'].iloc[0]} 통합 성적** <span class='{c_style}' style='margin-left:10px;'>전일 대비 ({daily_change:+.2f}%)</span>", unsafe_allow_html=True)
+        
+        t_buy_sum = target_df['매수금액'].sum()
+        t_eval_sum = target_df['평가금액'].sum()
+        summary = pd.DataFrame([{
+            '수량': target_df['보유수량'].sum(), 
+            '평단': t_buy_sum / target_df['보유수량'].sum() if target_df['보유수량'].sum() != 0 else 0,
+            '현재가': target_df['현재가'].iloc[0], '평가액': t_eval_sum, 
+            '비중': (t_eval_sum / total_eval_sum) * 100, 
+            '수익률': ((t_eval_sum - t_buy_sum) / t_buy_sum * 100) if t_buy_sum != 0 else 0
+        }])
+        st.dataframe(summary.style.format({'수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.2f}%'}), use_container_width=True, hide_index=True)
+        
+        st.write("📝 계좌별 상세 내역")
+        st.dataframe(target_df.sort_values(by='평가금액', ascending=False)[['계좌명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']].style.format({
+            '보유수량': '{:,.0f}', '매수평단': '{:,.0f}', '현재가': '{:,.0f}', '평가금액': '{:,.0f}', '수익률': '{:.2f}%'
+        }), use_container_width=True, hide_index=True)
 
-        st.markdown("---")
-        time_unit = st.radio("주기", ["일봉", "주봉"], horizontal=True)
-        stock_history = fdr.DataReader(target_df['종목코드'].iloc[0])
-        plot_data = stock_history.resample('W').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last'}) if time_unit == "주봉" else stock_history
-        fig_chart = go.Figure(data=[go.Candlestick(x=plot_data.index, open=plot_data['Open'], high=plot_data['High'], low=plot_data['Low'], close=plot_data['Close'])])
-        fig_chart.add_hline(y=avg_price, line_dash="dash", line_color="red")
-        fig_chart.update_layout(height=300, margin=dict(l=5, r=5, t=5, b=5), xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig_chart, use_container_width=True)
-
+    # --- TAB 2: 종목 비중 ---
     with tab2:
         sum_df = df.groupby(['약식종목명']).agg({'보유수량': 'sum', '매수금액': 'sum', '평가금액': 'sum'}).reset_index()
-        sum_df['평균평단'] = sum_df['매수금액'] / sum_df['보유수량']
         sum_df['비중'] = (sum_df['평가금액'] / total_eval_sum) * 100
-        sum_df['수익률'] = ((sum_df['평가금액'] - sum_df['매수금액']) / sum_df['매수금액']) * 100
+        sum_df['수익률'] = sum_df.apply(lambda x: 0.0 if x['약식종목명'] == '현금' else ((x['평가금액'] - x['매수금액']) / x['매수금액'] * 100 if x['매수금액'] != 0 else 0), axis=1)
         
-        price_lookup = df[['약식종목명', '현재가']].drop_duplicates('약식종목명')
-        sum_df = pd.merge(sum_df, price_lookup, on='약식종목명')
-        sum_df = sum_df.sort_values(by='비중', ascending=False)
+        st.plotly_chart(px.pie(sum_df, values='평가금액', names='약식종목명', hole=0.4, title="전체 자산 비중").update_traces(textinfo='percent+label'), use_container_width=True)
+        st.dataframe(sum_df.sort_values(by='비중', ascending=False).style.format({
+            '보유수량': '{:,.0f}', '매수금액': '{:,.0f}', '평가금액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.2f}%'
+        }), use_container_width=True, hide_index=True)
 
-        fig_pie = px.pie(sum_df, values='평가금액', names='약식종목명', hole=0.4)
-        st.plotly_chart(fig_pie, use_container_width=True)
+    # --- TAB_CAT: 카테고리 분석 ---
+    with tab_cat:
+        st.subheader("🏦 계좌 카테고리별 포트폴리오")
+        cat_order = ["세액공제 O", "세액공제 X", "ISA"]
+        actual_cats = [c for c in cat_order if c in df['계좌카테고리'].unique()] + [c for c in df['계좌카테고리'].unique() if c not in cat_order]
         
-        st.subheader("📊 종목별 통합 현황")
-        st.table(sum_df[['약식종목명', '보유수량', '평균평단', '현재가', '평가금액', '비중', '수익률']].rename(
-            columns={'약식종목명':'종목', '보유수량':'수량', '평균평단':'평단', '평가금액':'평가액'}
-        ).style.hide(axis='index').format({
-            '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.1f}%'
-        }))
+        for cat in actual_cats:
+            cat_df = df[df['계좌카테고리'] == cat].copy()
+            c_eval = cat_df['평가금액'].sum()
+            c_buy = cat_df['매수금액'].sum()
+            st.markdown(f"#### 📌 {cat} (평가: {c_eval:,.0f}원 / 수익: {((c_eval-c_buy)/c_buy*100 if c_buy !=0 else 0):+.2f}%)")
+            
+            l, r = st.columns([1.3, 1.7]) # 📍 도넛 차트 공간을 조금 더 확보
+            with l:
+                cat_sum = cat_df.groupby('약식종목명')['평가금액'].sum().reset_index()
+                fig_cat = px.pie(cat_sum, values='평가금액', names='약식종목명', hole=0.5)
+                # 📍 차트 사이즈 확대 및 여백 최소화
+                fig_cat.update_layout(showlegend=True, height=350, margin=dict(l=10, r=10, t=30, b=10),
+                                      legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
+                st.plotly_chart(fig_cat, use_container_width=True)
+            with r:
+                cat_df['비중'] = (cat_df['평가금액'] / c_eval) * 100
+                # 📍 테이블을 비중 순으로 정렬
+                cat_df_sorted = cat_df.sort_values(by='비중', ascending=False)
+                st.dataframe(cat_df_sorted[['계좌명', '약식종목명', '평가금액', '비중', '수익률']].rename(columns={'약식종목명':'종목', '평가금액':'평가액'}).style.format({
+                    '평가액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.2f}%'
+                }), use_container_width=True, hide_index=True)
+            st.markdown("---")
 
+    # --- TAB 3: 전체 계좌 ---
     with tab3:
         for acc in df['계좌명'].unique():
             acc_df = df[df['계좌명'] == acc].copy()
-            acc_total_eval = acc_df['평가금액'].sum()
-            acc_df['계좌내비중'] = (acc_df['평가금액'] / acc_total_eval) * 100
-            acc_df['수익률'] = ((acc_df['평가금액'] - acc_df['매수금액']) / acc_df['매수금액']) * 100
-            acc_df = acc_df.sort_values(by='계좌내비중', ascending=False)
+            a_eval = acc_df['평가금액'].sum()
+            a_buy = acc_df['매수금액'].sum()
+            st.markdown(f"🏦 **{acc}** (평가액: {a_eval:,.0f}원 / 수익률: {((a_eval-a_buy)/a_buy*100 if a_buy !=0 else 0):+.2f}%)")
             
-            st.write(f"🏦 **{acc}** (총 {acc_total_eval:,.0f}원)")
-            st.table(acc_df[['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '계좌내비중', '수익률']].rename(
-                columns={'약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액', '계좌내비중':'비중'}
-            ).style.hide(axis='index').format({
-                '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.1f}%'
-            }))
-
-    # 📍 [수정 포인트] 한 줄에 한 종목씩 정렬된 각주 섹션
-    st.markdown("---")
-    st.markdown("**[참고: 종목 명칭 정보]**")
-    for full_name, short_name in name_map.items():
-        st.markdown(f"<div class='footnote-item'>• {short_name} : {full_name}</div>", unsafe_allow_html=True)
+            # 📍 계좌 내 비중 계산 및 컬럼 순서 재구성
+            acc_df['계좌내비중'] = (acc_df['평가금액'] / a_eval) * 100
+            acc_df_sorted = acc_df.sort_values(by='계좌내비중', ascending=False)
+            
+            # 📍 요청하신 순서: 종목 - 수량 - 평단 - 현재가 - 평가액 - 비중 - 수익률
+            display_cols = ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '계좌내비중', '수익률']
+            st.dataframe(acc_df_sorted[display_cols].rename(columns={
+                '약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액', '계좌내비중':'비중'
+            }).style.format({
+                '수량': '{:,.0f}', '평단': '{:,.0f}', '현재가': '{:,.0f}', '평가액': '{:,.0f}', '비중': '{:.1f}%', '수익률': '{:.2f}%'
+            }), use_container_width=True, hide_index=True)
 
 except Exception as e:
-    st.error(f"오류: {e}")
+    st.error(f"⚠️ 오류 발생: {e}")
