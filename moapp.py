@@ -37,20 +37,24 @@ try:
     current_price_map = {}
     change_rate_map = {}
     
+    # 2. 실시간 시세 및 전일 등락률 계산 (보정된 버전)
     with st.spinner('실시간 시세 반영 중...'):
         for code in unique_codes:
+            # 📍 현금(CASH)인지 체크하여 시세 조회 원천 차단
             if code == 'CASH' or code == '' or pd.isna(code):
-                current_price_map[code] = 1.0
-                change_rate_map[code] = 0.0
-                continue
+                current_price_map[code] = 1.0   # 현금 현재가는 무조건 1원
+                change_rate_map[code] = 0.0    # 등락률은 무조건 0%
+                continue  # 다음 종목으로 바로 넘어감
+            
             try:
+                # 일반 종목 시세 조회
                 price_history = fdr.DataReader(code).tail(2)
                 if len(price_history) >= 2:
                     current_price = price_history['Close'].iloc[-1]
                     prev_price = price_history['Close'].iloc[-2]
                     change_rate = ((current_price - prev_price) / prev_price) * 100
                 else:
-                    current_price = price_history['Close'].iloc[-1]
+                    current_price = price_history.get('Close', [0]).iloc[-1]
                     change_rate = 0.0
                 current_price_map[code] = current_price
                 change_rate_map[code] = change_rate
