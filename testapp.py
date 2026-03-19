@@ -34,20 +34,17 @@ st.markdown("""<style>
 
 def safe_format(val):
     try:
-        f_val = float(val)
-        return f"{f_val:,.0f}"
+        return f"{float(val):,.0f}"
     except:
         return val
 
 def get_styled_df(target_df, cols_to_show):
-    # 📍 에러 해결 포인트: 데이터 형식을 미리 'object'로 변환하여 문자열 삽입 허용
+    # 📍 에러 해결: 복사본 생성 시 타입을 object로 강제하여 문자열(-) 삽입 허용
     available_cols = [c for c in cols_to_show if c in target_df.columns]
     df_view = target_df[available_cols].copy().astype(object)
     
     if '종목코드' in target_df.columns:
-        # CASH 행 찾기 (target_df 기준)
         is_cash = target_df['종목코드'].str.upper() == 'CASH'
-        # 현금 행의 수량, 평단, 현재가를 '-'로 변경
         for c in ['보유수량', '매수평단', '현재가']:
             if c in df_view.columns:
                 df_view.loc[is_cash, c] = "-"
@@ -78,10 +75,9 @@ try:
                 continue
             try:
                 hist = fdr.DataReader(code).tail(2)
-                if not hist.empty:
-                    p = float(hist['Close'].iloc[-1])
-                    price_map[code] = p
-                    chg_map[code] = ((p - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2] * 100) if len(hist) > 1 else 0
+                p = float(hist['Close'].iloc[-1])
+                price_map[code] = p
+                chg_map[code] = ((p - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2] * 100) if len(hist) > 1 else 0
             except: price_map[code], chg_map[code] = 0.0, 0.0
         
         # 실시간 환율
@@ -109,16 +105,16 @@ try:
     # --- TAB 1: 상세 ---
     with tabs[0]:
         st.subheader("📋 종목별 종합 현황")
-        summary_df = asset_df.groupby(['약식종목명', '종목코드', '자산군', '종목명']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
-        summary_df['매수평단'] = summary_df['매수금액'] / summary_df['보유수량']
-        summary_df['현재가'] = summary_df['종목코드'].map(price_map)
-        summary_df['수익률'] = (summary_df['평가금액'] - summary_df['매수금액']) / summary_df['매수금액'] * 100
-        st.dataframe(get_styled_df(summary_df.sort_values('평가금액', ascending=False), 
+        sum_df = asset_df.groupby(['약식종목명', '종목코드', '자산군', '종목명']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
+        sum_df['매수평단'] = sum_df['매수금액'] / sum_df['보유수량']
+        sum_df['현재가'] = sum_df['종목코드'].map(price_map)
+        sum_df['수익률'] = (sum_df['평가금액'] - sum_df['매수금액']) / sum_df['매수금액'] * 100
+        st.dataframe(get_styled_df(sum_df.sort_values('평가금액', ascending=False), 
                      ['약식종목명', '자산군', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), use_container_width=True, hide_index=True)
         
         st.divider()
         st.subheader("🔍 종목별 상세/차트")
-        sel_name = st.selectbox("종목 선택", summary_df['종목명'].unique())
+        sel_name = st.selectbox("종목 선택", sum_df['종목명'].unique())
         detail_df = asset_df[(asset_df['종목명'] == sel_name) & (asset_df['보유수량'] > 0)].copy()
         st.dataframe(get_styled_df(detail_df, ['계좌명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), use_container_width=True, hide_index=True)
         
@@ -126,18 +122,23 @@ try:
             code = detail_df['종목코드'].iloc[0]
             if code != "CASH":
                 hist_data = fdr.DataReader(code).tail(120)
-                fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
-                fig.update_layout(height=350, margin=dict(l=5, r=5, t=10, b=10), xaxis_rangeslider_visible=False)
+                fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], 
+                                                     increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
+                # 📍 평단가 점선 복구
+                avg_p = detail_df['매수금액'].sum() / detail_df['보유수량'].sum()
+                fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text=f"내 평단: {avg_p:,.0f}", annotation_position="top left")
+                
+                fig.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10), xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-    # --- TAB 2: 비중 (자산군 기준) ---
+    # --- TAB 2: 비중 (자산군) ---
     with tabs[1]:
         st.subheader("🍩 자산군별 비중")
-        group_df = asset_df.groupby('자산군').agg({'평가금액':'sum', '매수금액':'sum'}).reset_index()
-        group_df['비중'] = (group_df['평가금액'] / total_eval) * 100
-        group_df['수익률'] = (group_df['평가금액'] - group_df['매수금액']) / group_df['매수금액'] * 100
-        st.plotly_chart(px.pie(group_df, values='평가금액', names='자산군', hole=0.4), use_container_width=True)
-        st.dataframe(get_styled_df(group_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
+        grp_df = asset_df.groupby('자산군').agg({'평가금액':'sum', '매수금액':'sum'}).reset_index()
+        grp_df['비중'] = (grp_df['평가금액'] / total_eval) * 100
+        grp_df['수익률'] = (grp_df['평가금액'] - grp_df['매수금액']) / grp_df['매수금액'] * 100
+        st.plotly_chart(px.pie(grp_df, values='평가금액', names='자산군', hole=0.4), use_container_width=True)
+        st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
     # --- TAB 3: 분석 ---
     with tabs[2]:
@@ -152,8 +153,8 @@ try:
 
     # --- TAB 4: 전체 ---
     with tabs[3]:
-        order = ["연금저축(키움)", "IRP(미래)", "연금저축(미래)", "경성IRP(삼성)", "중개형ISA(키움)"]
-        for acc in [a for a in order if a in asset_df['계좌명'].unique()]:
+        acc_order = ["연금저축(키움)", "IRP(미래)", "연금저축(미래)", "경성IRP(삼성)", "중개형ISA(키움)"]
+        for acc in [a for a in acc_order if a in asset_df['계좌명'].unique()]:
             a_assets = asset_df[(asset_df['계좌명'] == acc) & (asset_df['보유수량'] > 0)].copy()
             st.markdown(f"### 🏦 {acc}")
             a_assets['비중'] = (a_assets['평가금액'] / a_assets['평가금액'].sum()) * 100
@@ -164,13 +165,14 @@ try:
         st.subheader("💱 실시간 환율 정보")
         st.metric("원/달러 환율", f"{current_fx:,.2f}원")
         
+        # 가이드 로직
         if current_fx < 1330:
-            adv, target_ratio = "환율 저점: **환노출 비중 80% 이상** 추천", {"노출": 80, "헤지": 20}
+            advice, t_ratio = "환율 저점: **환노출 비중 80% 이상** 추천", {"노출": 80, "헤지": 20}
         elif current_fx > 1400:
-            adv, target_ratio = "환율 고점: **환헤지 비중 70% 이상** 추천", {"노출": 30, "헤지": 70}
+            advice, t_ratio = "환율 고점: **환헤지 비중 70% 이상** 추천", {"노출": 30, "헤지": 70}
         else:
-            adv, target_ratio = "중립 구간: **환노출 50 : 환헤지 50** 추천", {"노출": 50, "헤지": 50}
-        st.info(adv)
+            advice, t_ratio = "중립 구간: **환노출 50 : 환헤지 50** 추천", {"노출": 50, "헤지": 50}
+        st.info(advice)
 
         st.subheader("📊 주요 자산군 환율 대응 현황")
         for tg in ["S&P500", "나스닥100"]:
@@ -185,7 +187,7 @@ try:
                     st.plotly_chart(px.pie(fx_grp, values='평가금액', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True)
                 with cl2:
                     st.write(f"**권장 {tg} 비율**")
-                    rec_df = pd.DataFrame([{"구분":"환노출", "비율":target_ratio['노출']}, {"구분":"환헤지", "비율":target_ratio['헤지']}])
+                    rec_df = pd.DataFrame([{"구분":"환노출", "비율":t_ratio['노출']}, {"구분":"환헤지", "비율":t_ratio['헤지']}])
                     st.plotly_chart(px.pie(rec_df, values='비율', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True)
 
 except Exception as e:
