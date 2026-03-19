@@ -8,9 +8,9 @@ from datetime import datetime, timedelta
 # [필수] 최상단 설정
 st.set_page_config(page_title="Family Portfolio", layout="wide")
 
-# 1. 데이터 로드 함수 (정식 파일명: my_assets.csv)
+# 1. 데이터 로드 함수 (정식 파일: my_assets.csv)
 def load_data():
-    target_file = 'my_assets.csv' # 📍 운영 데이터로 변경
+    target_file = 'my_assets.csv' 
     try:
         df = pd.read_csv(target_file, encoding='utf-8-sig', dtype={'종목코드': str})
     except:
@@ -41,7 +41,6 @@ def safe_format(val):
 
 def get_styled_df(target_df, cols_to_show):
     available_cols = [c for c in cols_to_show if c in target_df.columns]
-    # FutureWarning 방지를 위해 미리 object 타입으로 복사
     df_view = target_df[available_cols].copy().astype(object)
     
     if '종목코드' in target_df.columns:
@@ -96,7 +95,7 @@ try:
     # 상단 대시보드
     st.title("💰 Family Portfolio")
     c1, c2, c3 = st.columns(3)
-    c1.metric("총 투입원금", f"{total_seed:,.0f}원")
+    c1.metric("총 원금", f"{total_seed:,.0f}원")
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
     c3.metric("누적 수익", f"{(total_profit/total_seed*100) if total_seed > 0 else 0:.2f}%", f"{total_profit:+,.0f}원")
 
@@ -109,7 +108,6 @@ try:
         sum_df['매수평단'] = sum_df['매수금액'] / sum_df['보유수량']
         sum_df['현재가'] = sum_df['종목코드'].map(price_map).fillna(0)
         sum_df['수익률'] = sum_df.apply(lambda x: (x['평가금액'] - x['매수금액']) / x['매수금액'] * 100 if x['매수금액'] > 0 else 0, axis=1)
-        
         st.dataframe(get_styled_df(sum_df.sort_values('평가금액', ascending=False), 
                      ['약식종목명', '자산군', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), use_container_width=True, hide_index=True)
         
@@ -126,7 +124,6 @@ try:
                     hist_data = fdr.DataReader(code).tail(120)
                     fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], 
                                                          increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
-                    # 📍 평단선 복구
                     avg_p = detail_df['매수금액'].sum() / detail_df['보유수량'].sum() if detail_df['보유수량'].sum() > 0 else 0
                     if avg_p > 0:
                         fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text=f"내 평단: {avg_p:,.0f}", annotation_position="top left")
@@ -165,11 +162,12 @@ try:
             st.dataframe(get_styled_df(a_assets.sort_values('비중', ascending=False), 
                          ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
-    # --- TAB 5: 환율 관리 ---
+    # --- TAB 5: 환율 관리 (레이아웃 및 크기 최적화) ---
     with tabs[4]:
         st.subheader("💱 실시간 환율 정보")
         st.metric("원/달러 환율", f"{current_fx:,.2f}원")
         
+        # 가이드 설정
         if current_fx < 1330:
             advice, t_ratio = "환율 저점: **환노출 비중 80% 이상** 추천", {"노출": 80, "헤지": 20}
         elif current_fx > 1400:
@@ -178,20 +176,32 @@ try:
             advice, t_ratio = "중립 구간: **환노출 50 : 환헤지 50** 추천", {"노출": 50, "헤지": 50}
         st.info(advice)
 
-        st.subheader("📊 주요 자산군 환율 대응 현황")
+        # 📍 주요 자산군 환율 대응 도넛 차트 (크기 축소 및 좌우 배치)
         for tg in ["S&P500", "나스닥100"]:
             fx_sub = asset_df[(asset_df['자산군'] == tg) & (asset_df['계좌카테고리'].isin(["세액공제 O", "세액공제 X"])) & (asset_df['보유수량'] > 0)].copy()
             if not fx_sub.empty:
+                st.markdown(f"#### 📊 {tg} 노출 vs 헤지 비중")
                 fx_sub['구분'] = fx_sub['약식종목명'].apply(lambda x: '환헤지' if '(H)' in x or '헤지' in x else '환노출')
                 fx_grp = fx_sub.groupby('구분')['평가금액'].sum().reset_index()
+                
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.write(f"**현재 {tg} 비율**")
-                    st.plotly_chart(px.pie(fx_grp, values='평가금액', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True, key=f"curr_fx_{tg}")
+                    st.write("**As-Is (현재)**")
+                    fig_curr = px.pie(fx_grp, values='평가금액', names='구분', hole=0.5, color='구분', 
+                                      color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'})
+                    # 📍 차트 크기 작게 조절 (height=250)
+                    fig_curr.update_layout(height=250, margin=dict(l=10, r=10, t=30, b=10), showlegend=True, legend=dict(orientation="h", y=-0.1))
+                    st.plotly_chart(fig_curr, use_container_width=True, key=f"fx_asis_{tg}")
+                
                 with col2:
-                    st.write(f"**권장 {tg} 비율**")
+                    st.write("**To-Be (권장)**")
                     rec_df = pd.DataFrame([{"구분":"환노출", "비율":t_ratio['노출']}, {"구분":"환헤지", "비율":t_ratio['헤지']}])
-                    st.plotly_chart(px.pie(rec_df, values='비율', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True, key=f"rec_fx_{tg}")
+                    fig_rec = px.pie(rec_df, values='비율', names='구분', hole=0.5, color='구분', 
+                                     color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'})
+                    # 📍 차트 크기 작게 조절 (height=250)
+                    fig_rec.update_layout(height=250, margin=dict(l=10, r=10, t=30, b=10), showlegend=True, legend=dict(orientation="h", y=-0.1))
+                    st.plotly_chart(fig_rec, use_container_width=True, key=f"fx_tobe_{tg}")
+                st.markdown("---")
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
