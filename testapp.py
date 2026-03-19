@@ -40,7 +40,7 @@ def safe_format(val):
 
 def get_styled_df(target_df, cols_to_show):
     available_cols = [c for c in cols_to_show if c in target_df.columns]
-    # 에러 해결: 타입을 object로 미리 변환하여 '-' 삽입 시 발생하는 FutureWarning 방지
+    # 에러 해결: 타입을 object로 미리 변환하여 문자열(-) 삽입 허용
     df_view = target_df[available_cols].copy().astype(object)
     
     if '종목코드' in target_df.columns:
@@ -49,7 +49,7 @@ def get_styled_df(target_df, cols_to_show):
             if c in df_view.columns:
                 df_view.loc[is_cash, c] = "-"
 
-    rename_map = {'약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액'}
+    rename_map = {'계좌명':'계좌', '약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액'}
     df_view = df_view.rename(columns=rename_map)
     
     format_rules = {'평가액': '{:,.0f}', '수익률': '{:.2f}%', '비중': '{:.1f}%'}
@@ -125,7 +125,6 @@ try:
                 try:
                     hist_data = fdr.DataReader(code).tail(120)
                     fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
-                    # 📍 평단선 복구
                     avg_p = detail_df['매수금액'].sum() / detail_df['보유수량'].sum() if detail_df['보유수량'].sum() > 0 else 0
                     if avg_p > 0:
                         fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text=f"내 평단: {avg_p:,.0f}", annotation_position="top left")
@@ -142,7 +141,7 @@ try:
         st.plotly_chart(px.pie(grp_df, values='평가금액', names='자산군', hole=0.4), use_container_width=True, key="main_asset_pie")
         st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
-    # --- TAB 3: 분석 (📍 비중순 정렬 적용) ---
+    # --- TAB 3: 분석 (📍 계좌명 추가 및 비중 정렬) ---
     with tabs[2]:
         for cat in ["세액공제 O", "세액공제 X", "ISA"]:
             if cat in asset_df['계좌카테고리'].unique():
@@ -151,12 +150,12 @@ try:
                 st.plotly_chart(px.pie(c_assets.groupby('자산군')['평가금액'].sum().reset_index(), values='평가금액', names='자산군', hole=0.5), use_container_width=True, key=f"pie_{cat}")
                 
                 c_assets['비중'] = (c_assets['평가금액'] / c_assets['평가금액'].sum()) * 100 if c_assets['평가금액'].sum() > 0 else 0
-                # 📍 요구사항: 테이블 비중 내림차순 정렬
+                # 📍 요구사항: 계좌명 컬럼 추가 및 비중 내림차순 정렬
                 st.dataframe(get_styled_df(c_assets.sort_values('비중', ascending=False), 
-                             ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
+                             ['계좌명', '약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
                 st.markdown("---")
 
-    # --- TAB 4: 전체 (📍 비중순 정렬 적용) ---
+    # --- TAB 4: 전체 (📍 비중 정렬) ---
     with tabs[3]:
         acc_order = ["연금저축(키움)", "IRP(미래)", "연금저축(미래)", "경성IRP(삼성)", "중개형ISA(키움)"]
         for acc in [a for a in acc_order if a in asset_df['계좌명'].unique()]:
@@ -164,7 +163,7 @@ try:
             st.markdown(f"### 🏦 {acc}")
             
             a_assets['비중'] = (a_assets['평가금액'] / a_assets['평가금액'].sum()) * 100 if a_assets['평가금액'].sum() > 0 else 0
-            # 📍 요구사항: 테이블 비중 내림차순 정렬
+            # 📍 요구사항: 비중 내림차순 정렬
             st.dataframe(get_styled_df(a_assets.sort_values('비중', ascending=False), 
                          ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
