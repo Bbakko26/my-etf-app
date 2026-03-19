@@ -16,7 +16,6 @@ def load_data():
     except:
         df = pd.read_csv(target_file, encoding='cp949', dtype={'종목코드': str})
     
-    # 데이터 클리닝 및 타입 강제
     df['종목코드'] = df['종목코드'].fillna('CASH').str.strip()
     df['보유수량'] = pd.to_numeric(df['보유수량'], errors='coerce').fillna(0)
     df['매수평단'] = pd.to_numeric(df['매수평단'], errors='coerce').fillna(0)
@@ -25,7 +24,7 @@ def load_data():
         df['자산군'] = df['약식종목명']
     return df
 
-# 모바일 최적화 스타일
+# 스타일 설정
 st.markdown("""<style>
     html, body, [class*="css"] { font-size: 12px !important; }
     h1 { font-size: 1.1rem !important; }
@@ -40,12 +39,11 @@ def safe_format(val):
         return val
 
 def get_styled_df(target_df, cols_to_show):
-    # 📍 에러 해결: 복사본 생성 시 타입을 object로 강제하여 문자열(-) 삽입 허용
     available_cols = [c for c in cols_to_show if c in target_df.columns]
+    # 📍 에러 해결: 타입을 object로 미리 변환
     df_view = target_df[available_cols].copy().astype(object)
     
     if '종목코드' in target_df.columns:
-        # 인덱스 유지를 위해 직접 접근
         is_cash = target_df['종목코드'].str.upper() == 'CASH'
         for c in ['보유수량', '매수평단', '현재가']:
             if c in df_view.columns:
@@ -69,31 +67,27 @@ try:
     unique_codes = asset_df['종목코드'].unique()
     price_map, chg_map = {}, {}
     
-    with st.spinner('실시간 데이터 업데이트 중...'):
+    with st.spinner('데이터 업데이트 중...'):
         for code in unique_codes:
             if code.upper() in ['CASH', '현금', 'NAN', '']:
                 price_map[code], chg_map[code] = 1.0, 0.0
                 continue
             try:
                 hist = fdr.DataReader(code).tail(2)
-                if not hist.empty:
-                    p = float(hist['Close'].iloc[-1])
-                    price_map[code] = p
-                    chg_map[code] = ((p - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2] * 100) if len(hist) > 1 else 0
-                else: price_map[code], chg_map[code] = 0.0, 0.0
+                p = float(hist['Close'].iloc[-1])
+                price_map[code] = p
+                chg_map[code] = ((p - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2] * 100) if len(hist) > 1 else 0
             except: price_map[code], chg_map[code] = 0.0, 0.0
         
-        # 환율 정보
         try:
             usd_krw = fdr.DataReader('USD/KRW').tail(1)
             current_fx = float(usd_krw['Close'].iloc[-1])
-        except: current_fx = 1350.0 # 환율 로드 실패 시 기본값
+        except: current_fx = 1350.0
 
-    # 📍 자산 연산 (오타 전수 수정)
+    # 자산 연산
     asset_df['현재가'] = asset_df['종목코드'].map(price_map).fillna(0)
     asset_df['매수금액'] = asset_df.apply(lambda x: x['보유수량'] if x['종목코드'].upper() == 'CASH' else x['보유수량'] * x['매수평단'], axis=1)
     asset_df['평가금액'] = asset_df['보유수량'] * asset_df['현재가']
-    # 수익률 계산 시 분모가 0인 경우 예외 처리
     asset_df['수익률'] = asset_df.apply(lambda x: ((x['평가금액'] - x['매수금액']) / x['매수금액'] * 100) if x['매수금액'] > 0 else 0, axis=1)
     
     total_eval = asset_df['평가금액'].sum()
@@ -130,15 +124,13 @@ try:
             if code != "CASH":
                 try:
                     hist_data = fdr.DataReader(code).tail(120)
-                    fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], 
-                                                         increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
-                    # 📍 내 평단가 점선 복구 (가중 평균 평단가 계산)
+                    fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
+                    # 📍 평단선 복구
                     avg_p = detail_df['매수금액'].sum() / detail_df['보유수량'].sum() if detail_df['보유수량'].sum() > 0 else 0
                     if avg_p > 0:
                         fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text=f"내 평단: {avg_p:,.0f}", annotation_position="top left")
-                    
                     fig.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10), xaxis_rangeslider_visible=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="detail_candle_chart")
                 except: st.info("차트 데이터를 불러올 수 없습니다.")
 
     # --- TAB 2: 비중 (자산군) ---
@@ -147,7 +139,7 @@ try:
         grp_df = asset_df.groupby('자산군').agg({'평가금액':'sum', '매수금액':'sum'}).reset_index()
         grp_df['비중'] = (grp_df['평가금액'] / total_eval) * 100
         grp_df['수익률'] = grp_df.apply(lambda x: (x['평가금액'] - x['매수금액']) / x['매수금액'] * 100 if x['매수금액'] > 0 else 0, axis=1)
-        st.plotly_chart(px.pie(grp_df, values='평가금액', names='자산군', hole=0.4), use_container_width=True)
+        st.plotly_chart(px.pie(grp_df, values='평가금액', names='자산군', hole=0.4), use_container_width=True, key="main_asset_pie")
         st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
     # --- TAB 3: 분석 ---
@@ -156,7 +148,8 @@ try:
             if cat in asset_df['계좌카테고리'].unique():
                 c_assets = asset_df[(asset_df['계좌카테고리'] == cat) & (asset_df['보유수량'] > 0)].copy()
                 st.subheader(f"🏦 {cat}")
-                st.plotly_chart(px.pie(c_assets.groupby('자산군')['평가금액'].sum().reset_index(), values='평가금액', names='자산군', hole=0.5), use_container_width=True)
+                # 📍 에러 해결: 루프 내 차트에 고유 key 부여
+                st.plotly_chart(px.pie(c_assets.groupby('자산군')['평가금액'].sum().reset_index(), values='평가금액', names='자산군', hole=0.5), use_container_width=True, key=f"pie_{cat}")
                 c_assets['비중'] = (c_assets['평가금액'] / c_assets['평가금액'].sum()) * 100 if c_assets['평가금액'].sum() > 0 else 0
                 st.dataframe(get_styled_df(c_assets, ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
                 st.markdown("---")
@@ -193,11 +186,13 @@ try:
                 cl1, cl2 = st.columns(2)
                 with cl1:
                     st.write(f"**현재 {tg} 비율**")
-                    st.plotly_chart(px.pie(fx_grp, values='평가금액', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True)
+                    # 📍 에러 해결: 고유 key 부여
+                    st.plotly_chart(px.pie(fx_grp, values='평가금액', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True, key=f"curr_fx_pie_{tg}")
                 with cl2:
                     st.write(f"**권장 {tg} 비율**")
+                    # 📍 에러 해결: 고유 key 부여
                     rec_df = pd.DataFrame([{"구분":"환노출", "비율":t_ratio['노출']}, {"구분":"환헤지", "비율":t_ratio['헤지']}])
-                    st.plotly_chart(px.pie(rec_df, values='비율', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True)
+                    st.plotly_chart(px.pie(rec_df, values='비율', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True, key=f"rec_fx_pie_{tg}")
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
