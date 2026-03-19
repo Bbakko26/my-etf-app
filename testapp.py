@@ -84,7 +84,7 @@ try:
     asset_df['현재가'] = asset_df['종목코드'].map(price_map)
     asset_df['매수금액'] = asset_df.apply(lambda x: x['보유수량'] if x['종목코드'].upper() == 'CASH' else x['보유수량'] * x['매수평단'], axis=1)
     asset_df['평가금액'] = asset_df['보유수량'] * asset_df['현재가']
-    asset_df['수익률'] = asset_df.apply(lambda x: ((x['평가금액'] - x['매_수금액']) / x['매수금액'] * 100) if x['매수금액'] != 0 else 0, axis=1)
+    asset_df['수익률'] = asset_df.apply(lambda x: ((x['평가금액'] - x['매수금액']) / x['매수금액'] * 100) if x['매수금액'] != 0 else 0, axis=1)
     asset_df['비중'] = (asset_df['평가금액'] / asset_df['평가금액'].sum()) * 100
 
     total_eval = asset_df['평가금액'].sum()
