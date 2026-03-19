@@ -99,7 +99,7 @@ try:
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
     c3.metric("누적 수익", f"{(total_profit/total_seed*100) if total_seed > 0 else 0:.2f}%", f"{total_profit:+,.0f}원")
 
-    tabs = st.tabs(["📊 상세", "🍩 비중", "🏦 분석", "💼 전체", "🌎 환율관리"])
+    tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 분석", "💼 계좌별 ", "🌎 환율관리"])
 
     # --- TAB 1: 상세 ---
     with tabs[0]:
