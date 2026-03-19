@@ -40,7 +40,7 @@ def safe_format(val):
 
 def get_styled_df(target_df, cols_to_show):
     available_cols = [c for c in cols_to_show if c in target_df.columns]
-    # 📍 에러 해결: 타입을 object로 미리 변환
+    # 에러 해결: 타입을 object로 미리 변환하여 '-' 삽입 시 발생하는 FutureWarning 방지
     df_view = target_df[available_cols].copy().astype(object)
     
     if '종목코드' in target_df.columns:
@@ -67,7 +67,7 @@ try:
     unique_codes = asset_df['종목코드'].unique()
     price_map, chg_map = {}, {}
     
-    with st.spinner('데이터 업데이트 중...'):
+    with st.spinner('실시간 시세 동기화 중...'):
         for code in unique_codes:
             if code.upper() in ['CASH', '현금', 'NAN', '']:
                 price_map[code], chg_map[code] = 1.0, 0.0
@@ -142,26 +142,31 @@ try:
         st.plotly_chart(px.pie(grp_df, values='평가금액', names='자산군', hole=0.4), use_container_width=True, key="main_asset_pie")
         st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
-    # --- TAB 3: 분석 ---
+    # --- TAB 3: 분석 (📍 비중순 정렬 적용) ---
     with tabs[2]:
         for cat in ["세액공제 O", "세액공제 X", "ISA"]:
             if cat in asset_df['계좌카테고리'].unique():
                 c_assets = asset_df[(asset_df['계좌카테고리'] == cat) & (asset_df['보유수량'] > 0)].copy()
                 st.subheader(f"🏦 {cat}")
-                # 📍 에러 해결: 루프 내 차트에 고유 key 부여
                 st.plotly_chart(px.pie(c_assets.groupby('자산군')['평가금액'].sum().reset_index(), values='평가금액', names='자산군', hole=0.5), use_container_width=True, key=f"pie_{cat}")
+                
                 c_assets['비중'] = (c_assets['평가금액'] / c_assets['평가금액'].sum()) * 100 if c_assets['평가금액'].sum() > 0 else 0
-                st.dataframe(get_styled_df(c_assets, ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
+                # 📍 요구사항: 테이블 비중 내림차순 정렬
+                st.dataframe(get_styled_df(c_assets.sort_values('비중', ascending=False), 
+                             ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
                 st.markdown("---")
 
-    # --- TAB 4: 전체 ---
+    # --- TAB 4: 전체 (📍 비중순 정렬 적용) ---
     with tabs[3]:
         acc_order = ["연금저축(키움)", "IRP(미래)", "연금저축(미래)", "경성IRP(삼성)", "중개형ISA(키움)"]
         for acc in [a for a in acc_order if a in asset_df['계좌명'].unique()]:
             a_assets = asset_df[(asset_df['계좌명'] == acc) & (asset_df['보유수량'] > 0)].copy()
             st.markdown(f"### 🏦 {acc}")
+            
             a_assets['비중'] = (a_assets['평가금액'] / a_assets['평가금액'].sum()) * 100 if a_assets['평가금액'].sum() > 0 else 0
-            st.dataframe(get_styled_df(a_assets, ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
+            # 📍 요구사항: 테이블 비중 내림차순 정렬
+            st.dataframe(get_styled_df(a_assets.sort_values('비중', ascending=False), 
+                         ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
     # --- TAB 5: 환율 관리 ---
     with tabs[4]:
@@ -186,11 +191,9 @@ try:
                 cl1, cl2 = st.columns(2)
                 with cl1:
                     st.write(f"**현재 {tg} 비율**")
-                    # 📍 에러 해결: 고유 key 부여
                     st.plotly_chart(px.pie(fx_grp, values='평가금액', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True, key=f"curr_fx_pie_{tg}")
                 with cl2:
                     st.write(f"**권장 {tg} 비율**")
-                    # 📍 에러 해결: 고유 key 부여
                     rec_df = pd.DataFrame([{"구분":"환노출", "비율":t_ratio['노출']}, {"구분":"환헤지", "비율":t_ratio['헤지']}])
                     st.plotly_chart(px.pie(rec_df, values='비율', names='구분', hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}), use_container_width=True, key=f"rec_fx_pie_{tg}")
 
