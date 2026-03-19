@@ -1,16 +1,22 @@
+import streamlit as st
+import pandas as pd
 import FinanceDataReader as fdr
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. 데이터 불러오기 (테스트용 파일)
+# 📍 [수정] st.set_page_config는 반드시 코드 최상단(Import 바로 아래)에 위치해야 합니다.
+st.set_page_config(page_title="Family Portfolio (TEST)", layout="wide")
+
+# 1. 데이터 불러오기 함수
 def load_data():
-    target_file = 'my_assets_ex.csv'
+    target_file = 'my_assets_ex.csv' # 🧪 테스트용 파일명
     try:
         df = pd.read_csv(target_file, encoding='utf-8-sig', dtype={'종목코드': str})
     except:
         df = pd.read_csv(target_file, encoding='cp949', dtype={'종목코드': str})
     
+    # 기본 전처리
     df['종목코드'] = df['종목코드'].fillna('CASH').str.strip()
     if '자산군' not in df.columns:
         df['자산군'] = df['약식종목명'] if '약식종목명' in df.columns else df['종목명']
@@ -18,8 +24,7 @@ def load_data():
         df['계좌카테고리'] = '미지정'
     return df
 
-# 기능 1: 모바일 최적화 설정
-st.set_page_config(page_title="Family Portfolio (TEST)", layout="wide")
+# 2. 모바일 최적화 CSS (기능 1)
 st.markdown("""
     <style>
     html, body, [class*="css"] { font-size: 12px !important; }
@@ -41,13 +46,13 @@ try:
     unique_codes = asset_df['종목코드'].unique()
     current_price_map, change_rate_map = {}, {}
     
-    with st.spinner('시세 반영 중...'):
+    with st.spinner('테스트 데이터 시세 반영 중...'):
         for code in unique_codes:
             if code.upper() in ['CASH', '현금', 'NAN', '']:
                 current_price_map[code], change_rate_map[code] = 1.0, 0.0
                 continue
             try:
-                # 기능 6용 120일 데이터 확보
+                # 기능 6: 120일 차트 데이터 확보
                 price_history = fdr.DataReader(code).tail(130)
                 if len(price_history) >= 2:
                     curr_p = float(price_history['Close'].iloc[-1])
@@ -57,13 +62,13 @@ try:
             except:
                 current_price_map[code], change_rate_map[code] = 0.0, 0.0
 
-    # 데이터 계산
+    # 데이터 연산
     asset_df['현재가'] = asset_df['종목코드'].map(current_price_map)
     asset_df['매수금액'] = asset_df.apply(lambda x: x['보유수량'] if x['종목코드'].upper() == 'CASH' else x['보유수량'] * x['매수평단'], axis=1)
     asset_df['평가금액'] = asset_df['보유수량'] * asset_df['현재가']
     asset_df['수익률'] = asset_df.apply(lambda x: 0.0 if x['종목코드'].upper() == 'CASH' else ((x['평가금액'] - x['매수금액']) / x['매수금액'] * 100 if x['매수금액'] != 0 else 0), axis=1)
 
-    # 기능 4: 누적 손익 계산
+    # 기능 4: 누적 지표 계산
     total_eval = asset_df['평가금액'].sum()
     total_seed = (seed_df['보유수량'] * seed_df['매수평단']).sum() if not seed_df.empty else asset_df['매수금액'].sum()
     total_profit = total_eval - total_seed
@@ -79,28 +84,28 @@ try:
 
     tab1, tab2, tab_cat, tab3 = st.tabs(["📊 상세", "🍩 비중", "🏦 분석", "💼 전체"])
 
-    # 📍 기능 2, 3 해결사: 안전한 포맷팅 함수
+    # 📍 [해결] 기능 2, 3: 문자열과 숫자가 섞여도 에러 없는 포맷팅 함수
     def safe_format(val):
         try:
             return f"{float(val):,.0f}"
         except (ValueError, TypeError):
-            return val # '-' 등 문자열은 그대로 반환
+            return val # '-' 등은 그대로 반환
 
     def make_display_table(target_df, cols):
         display_df = target_df.copy()
         is_cash = display_df['종목코드'].str.upper() == 'CASH'
         
-        # 기능 3: 현금 예외 처리
+        # 기능 3: 현금을 '-'로 표시하여 가독성 증대
         for col in ['보유수량', '매수평단', '현재가']:
             if col in display_df.columns:
                 display_df[col] = display_df[col].astype(object)
                 display_df.loc[is_cash, col] = "-"
         
-        # 컬럼명 매핑 (오류 방지를 위해 존재 확인 후 rename)
+        # [수정] 스크린샷의 Index 오류 방지를 위해 존재하지 않는 컬럼명 참조 제거
         rename_dict = {'약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액'}
         res = display_df[cols].rename(columns=rename_dict)
         
-        # 기능 2: 현재가 정수화 (문자열 섞임 방지 스타일링)
+        # 기능 2: 현재가 정수화 스타일링
         return res.style.format({
             '수량': lambda x: safe_format(x),
             '평단': lambda x: safe_format(x),
@@ -109,7 +114,7 @@ try:
             '수익률': '{:.2f}%'
         })
 
-    # --- TAB 1: 상세 (기능 6 차트 포함) ---
+    # --- TAB 1: 상세 현황 (기능 6 차트 포함) ---
     with tab1:
         sort_ref = asset_df.groupby('종목명')['평가금액'].sum().sort_values(ascending=False).index.tolist()
         selected_stock = st.selectbox("📂 종목 선택", sort_ref)
@@ -118,7 +123,6 @@ try:
         daily_chg = change_rate_map.get(target_df['종목코드'].iloc[0], 0.0)
         st.markdown(f"**{target_df['약식종목명'].iloc[0]}** <span style='color:{'#d32f2f' if daily_chg > 0 else '#1976d2'}; font-size:12px;'>({daily_chg:+.2f}%)</span>", unsafe_allow_html=True)
         
-        # 스크린샷 오류 해결: 정확한 컬럼명 전달
         st.dataframe(make_display_table(target_df.sort_values(by='평가금액', ascending=False), 
                                       ['계좌명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), 
                      use_container_width=True, hide_index=True)
@@ -130,14 +134,14 @@ try:
                 plot_data = stock_h[stock_h.index >= (datetime.now() - timedelta(days=120))]
                 fig = go.Figure(data=[go.Candlestick(x=plot_data.index, open=plot_data['Open'], high=plot_data['High'], low=plot_data['Low'], close=plot_data['Close'], 
                                                      increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
-                # 기능 6: 내 평단 점선
+                # 기능 6: 내 평단 점선 복구
                 avg_p = target_df['매수금액'].sum() / target_df['보유수량'].sum() if target_df['보유수량'].sum() != 0 else 0
                 fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text="내 평단")
                 fig.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False)
                 st.plotly_chart(fig, use_container_width=True)
             except: st.info("차트 로딩 중...")
 
-    # --- TAB 2: 비중 ---
+    # --- TAB 2: 비중 (종목별) ---
     with tab2:
         sum_df = asset_df.groupby(['약식종목명', '종목코드']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
         sum_df['비중'] = (sum_df['평가금액'] / total_eval) * 100
@@ -159,12 +163,13 @@ try:
                 fig_cat.update_layout(height=400, showlegend=True, legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center"))
                 st.plotly_chart(fig_cat, use_container_width=True)
                 
-                # 상세 테이블 (종목별)
                 cat_table = cat_assets.groupby(['약식종목명', '자산군', '종목코드']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
                 cat_table['매수평단'] = cat_table['매수금액'] / cat_table['보유수량']
                 cat_table['현재가'] = cat_table['종목코드'].map(current_price_map)
                 cat_table['수익률'] = ((cat_table['평가금액'] - cat_table['매수금액']) / cat_table['매수금액'] * 100).fillna(0)
-                st.dataframe(make_display_table(cat_table.sort_values(by='평가금액', ascending=False), ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), use_container_width=True, hide_index=True)
+                st.dataframe(make_display_table(cat_table.sort_values(by='평가금액', ascending=False), 
+                                              ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), 
+                             use_container_width=True, hide_index=True)
                 st.markdown("---")
 
     # --- TAB 4: 전체 계좌 (기능 4 누적수익률) ---
@@ -173,7 +178,9 @@ try:
         for acc in [a for a in fixed_order if a in asset_df['계좌명'].unique()]:
             acc_assets = asset_df[asset_df['계좌명'] == acc]
             acc_seed = (seed_df[seed_df['계좌명'] == acc]['보유수량'] * seed_df[seed_df['계좌명'] == acc]['매수평단']).sum()
-            st.markdown(f"🏦 **{acc}** (수익률: {(acc_assets['평가금액'].sum()-acc_seed)/acc_seed*100 if acc_seed!=0 else 0:+.2f}%)")
+            st.markdown(f"### 🏦 {acc}")
+            st.markdown(f"**수익률: {(acc_assets['평가금액'].sum()-acc_seed)/acc_seed*100 if acc_seed!=0 else 0:+.2f}%** (원금: {acc_seed:,.0f} / 현재: {acc_assets['평가금액'].sum():,.0f})")
+            
             st.dataframe(make_display_table(acc_assets.sort_values(by='평가금액', ascending=False), 
                                           ['약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), 
                          use_container_width=True, hide_index=True)
