@@ -57,21 +57,20 @@ try:
     cat_targets = {
         "세액공제 O": {"나스닥100": 40.0, "S&P500": 40.0, "국내 ETF": 10.0, "금": 5.0, "현금": 5.0},
         "세액공제 X": {"나스닥100": 50.0, "S&P500": 50.0},
-        "ISA": {"미국배당다우존스": 50.0, "S&P500": 30.0, "현금": 20.0}
+        "ISA": {"다우존스": 50.0, "S&P500": 30.0, "현금": 20.0} # 📍 수정됨
     }
     code_map = {
         "S&P500": {"노출": "360750", "헤지": "448290"},
         "나스닥100": {"노출": "133690", "헤지": "448300"},
-        "미국배당다우존스": {"노출": "458730", "헤지": "452250"}
+        "다우존스": {"노출": "458730", "헤지": "452250"} # 📍 수정됨
     }
     # -------------------------------------------------------
 
-    with st.spinner('실시간 시세 업데이트 중...'):
+    with st.spinner('실시간 데이터 업데이트 중...'):
         unique_codes = asset_df['종목코드'].unique()
         price_map = {code: (fdr.DataReader(code).tail(1)['Close'].iloc[-1] if code.upper() not in ['CASH','현금','NAN',''] else 1.0) for code in unique_codes}
         current_fx = float(fdr.DataReader('USD/KRW').tail(1)['Close'].iloc[-1])
 
-    # 자산 연산
     asset_df['현재가'] = asset_df['종목코드'].map(price_map).fillna(0)
     asset_df['매수금액'] = asset_df.apply(lambda x: x['보유수량'] if x['종목코드'].upper() == 'CASH' else x['보유수량'] * x['매수평단'], axis=1)
     asset_df['평가금액'] = asset_df['보유수량'] * asset_df['현재가']
@@ -79,19 +78,17 @@ try:
     total_seed = (seed_df['보유수량'] * seed_df['매수평단']).sum()
     total_profit = total_eval - total_seed
 
-    # 📍 복구된 상단 대시보드
+    # 상단 대시보드
     st.title("💰 Family Portfolio")
     c1, c2, c3 = st.columns(3)
     c1.metric("총 투입원금", f"{total_seed:,.0f}원")
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
     c3.metric("누적 수익", f"{(total_profit/total_seed*100) if total_seed > 0 else 0:.2f}%", f"{total_profit:+,.0f}원")
 
-    # 탭 명칭 고정
     tabs = st.tabs(["1. 종목 상세", "2. 비중 및 리밸런싱", "3. 카테고리 분석", "4. 계좌별", "5. 환율관리"])
 
-    # --- 1. 종목 상세 (120일 차트 복구) ---
+    # --- 1. 종목 상세 ---
     with tabs[0]:
-        st.subheader("📋 종목별 종합 현황")
         sum_df = asset_df.groupby(['약식종목명', '종목코드', '자산군', '종목명']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
         sum_df['매수평단'] = sum_df['매수금액'] / sum_df['보유수량']
         sum_df['현재가'] = sum_df['종목코드'].map(price_map).fillna(0)
@@ -100,23 +97,21 @@ try:
         
         st.divider()
         sel_name = st.selectbox("종목 선택", sum_df['종목명'].unique())
-        detail_df = asset_df[asset_df['종목명'] == sel_name].copy() # 📍 수량 0도 평단 확인 위해 포함
+        detail_df = asset_df[asset_df['종목명'] == sel_name].copy()
         st.dataframe(get_styled_df(detail_df[detail_df['보유수량']>0], ['계좌명', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), use_container_width=True, hide_index=True)
         
-        # 📍 120일 차트 복구 로직
         if not detail_df.empty:
             code = detail_df['종목코드'].iloc[0]
             if code.upper() != "CASH":
                 try:
                     hist_data = fdr.DataReader(code).tail(120)
-                    if not hist_data.empty:
-                        fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
-                        avg_p = detail_df['매수금액'].sum() / detail_df['보유수량'].sum() if detail_df['보유수량'].sum() > 0 else 0
-                        if avg_p > 0:
-                            fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text=f"내 평단: {avg_p:,.0f}", annotation_position="top left")
-                        fig.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10), xaxis_rangeslider_visible=False)
-                        st.plotly_chart(fig, use_container_width=True, key=f"candle_{code}")
-                except Exception as e: st.info(f"차트 로드 중: {e}")
+                    fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
+                    avg_p = detail_df['매수금액'].sum() / detail_df['보유수량'].sum() if detail_df['보유수량'].sum() > 0 else 0
+                    if avg_p > 0:
+                        fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text=f"내 평단: {avg_p:,.0f}", annotation_position="top left")
+                    fig.update_layout(height=400, margin=dict(l=10, r=10, t=30, b=10), xaxis_rangeslider_visible=False)
+                    st.plotly_chart(fig, use_container_width=True, key=f"candle_{code}")
+                except: st.info("차트 데이터를 불러올 수 없습니다.")
 
     # --- 2. 비중 및 리밸런싱 ---
     with tabs[1]:
@@ -134,7 +129,7 @@ try:
         c2.plotly_chart(px.pie(grp_df, values='목표', names='자산군', title="목표(Target)", hole=0.5).update_layout(height=300), use_container_width=True, key="p2_to")
         st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '목표', '차이']), use_container_width=True, hide_index=True)
 
-    # --- 3. 카테고리 분석 (추가 매수 가이드 강화) ---
+    # --- 3. 카테고리 분석 ---
     with tabs[2]:
         for cat_name in ["세액공제 O", "세액공제 X", "ISA"]:
             sub_df = asset_df[asset_df['계좌카테고리'] == cat_name].copy()
@@ -146,7 +141,6 @@ try:
                 sub_grp['목표'] = sub_grp['자산군'].map(cat_targets.get(cat_name, {})).fillna(0)
                 sub_grp['차이'] = sub_grp['비중'] - sub_grp['목표']
 
-                # 💡 환율 기반 정밀 매수 가이드
                 recom_type = "헤지" if current_fx > 1380 else "노출"
                 for _, row in sub_grp.iterrows():
                     if row['차이'] <= -3.0 and row['자산군'] in code_map:
@@ -167,7 +161,7 @@ try:
             a_df['비중'] = (a_df['평가금액'] / a_df['평가금액'].sum()) * 100
             st.dataframe(get_styled_df(a_df.sort_values('비중', ascending=False), ['약식종목명', '보유수량', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
 
-    # --- 5. 환율관리 (요청 레이아웃: 계좌 성격별 자산군 분기) ---
+    # --- 5. 환율관리 (📍 자산군 이름 '다우존스'로 수정됨) ---
     with tabs[4]:
         st.subheader(f"🌎 실시간 환율: {current_fx:,.2f}원")
         t_fx = {"노출": 30, "헤지": 70} if current_fx > 1400 else ({"노출": 80, "헤지": 20} if current_fx < 1330 else {"노출": 50, "헤지": 50})
@@ -175,7 +169,7 @@ try:
         fx_config = {
             "세액공제 O": ["S&P500", "나스닥100"],
             "세액공제 X": ["S&P500", "나스닥100"],
-            "ISA": ["미국배당다우존스", "S&P500"]
+            "ISA": ["다우존스", "S&P500"] # 📍 수정됨
         }
         
         for cat_name, targets in fx_config.items():
