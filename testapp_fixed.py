@@ -13,11 +13,11 @@ st.set_page_config(page_title="Family Portfolio", layout="wide")
 DISPLAY_TO_CANONICAL = {
     '현금성 (KOFR)': '금리',
     '미국 국채': '미국채',
-    '현금': '금리',
 }
 CANONICAL_TO_DISPLAY = {
     '금리': '현금성 (KOFR)',
     '미국채': '미국 국채',
+    '현금': '현금',
 }
 
 CATEGORY_TARGETS = {
@@ -41,6 +41,9 @@ CATEGORY_TARGETS = {
         '금리': 0.30,
     },
 }
+
+CATEGORY_ORDER = ['세액공제 O', '세액공제 X', 'ISA']
+CATEGORY_ORDER_MAP = {name: idx for idx, name in enumerate(CATEGORY_ORDER)}
 
 IRP_SAFE_ASSETS = {'금', '미국채', '금리'}
 CODE_MAP = {
@@ -271,6 +274,10 @@ def build_overall_target_mix(asset_df):
     return {asset: (amt / total_val) * 100 for asset, amt in overall_amt.items()}
 
 
+def get_rebalance_base_df(category_df):
+    return category_df[category_df['자산군'] != '현금'].copy()
+
+
 # -----------------------------
 # 리밸런싱 엔진
 # -----------------------------
@@ -308,10 +315,36 @@ def allocate_amounts_by_capacity(accounts, amount):
     return allocation, remaining
 
 
+def build_virtual_order_row(target_asset):
+    code_info = CODE_MAP.get(target_asset, {})
+    if target_asset in {'S&P500', '나스닥100', '다우존스'}:
+        current_fx = get_usdkrw()
+        prefer_hedged = current_fx > 1380
+        code = code_info.get('헤지' if prefer_hedged else '노출')
+        name_suffix = '(H)' if prefer_hedged else ''
+        short_name = f"{display_asset_group(target_asset)} {name_suffix}".strip()
+    else:
+        code = code_info.get('기본')
+        short_name = display_asset_group(target_asset)
+
+    if not code:
+        return None
+
+    curr_price = price_map.get(code, 0.0) if 'price_map' in globals() else 0.0
+    return pd.Series({
+        '자산군': target_asset,
+        '약식종목명': short_name,
+        '종목코드': code,
+        '현재가': curr_price,
+        '보유수량': 0,
+        '평가금액': 0.0,
+    })
+
+
 def choose_order_row(acc_df, target_asset):
     candidates = acc_df[acc_df['자산군'] == target_asset].copy()
     if candidates.empty:
-        return None
+        return build_virtual_order_row(target_asset)
 
     if target_asset in {'S&P500', '나스닥100', '다우존스'}:
         current_fx = get_usdkrw()
@@ -336,16 +369,17 @@ def choose_order_row(acc_df, target_asset):
 
 def build_category_rebalance_plan(category_df, category_name):
     targets = CATEGORY_TARGETS.get(category_name, {})
-    category_total = float(category_df['평가금액'].sum())
+    rebalance_df = get_rebalance_base_df(category_df)
+    category_total = float(rebalance_df['평가금액'].sum())
     if category_total <= 0 or not targets:
         return [], [], {}
 
-    account_balances = category_df.groupby('계좌명')['평가금액'].sum().to_dict()
+    account_balances = rebalance_df.groupby('계좌명')['평가금액'].sum().to_dict()
     irp_accounts = [acc for acc in account_balances if 'IRP' in str(acc).upper()]
     non_irp_accounts = [acc for acc in account_balances if acc not in irp_accounts]
 
     target_amounts = {asset: category_total * w for asset, w in targets.items()}
-    current_amounts = category_df.groupby('자산군')['평가금액'].sum().to_dict()
+    current_amounts = rebalance_df.groupby('자산군')['평가금액'].sum().to_dict()
     allocation = {acc: {asset: 0.0 for asset in targets} for acc in account_balances}
     warnings = []
 
@@ -419,7 +453,7 @@ def build_category_rebalance_plan(category_df, category_name):
     # 3) 결과 테이블 구성
     plan_rows = []
     for acc, per_asset in allocation.items():
-        acc_df = category_df[category_df['계좌명'] == acc].copy()
+        acc_df = rebalance_df[rebalance_df['계좌명'] == acc].copy()
         for asset, target_amt in per_asset.items():
             if target_amt <= 0:
                 continue
@@ -450,7 +484,7 @@ def build_category_rebalance_plan(category_df, category_name):
 
     rule_rows = []
     for acc in irp_accounts:
-        safe_now = category_df[(category_df['계좌명'] == acc) & (category_df['자산군'].isin(IRP_SAFE_ASSETS))]['평가금액'].sum()
+        safe_now = rebalance_df[(rebalance_df['계좌명'] == acc) & (rebalance_df['자산군'].isin(IRP_SAFE_ASSETS))]['평가금액'].sum()
         safe_target = sum(allocation[acc].get(asset, 0.0) for asset in safe_assets)
         acc_total = account_balances[acc]
         rule_rows.append({
@@ -711,10 +745,11 @@ try:
     # 6. 리밸런싱
     with tabs[5]:
         st.subheader("⚖️ 카테고리별 리밸런싱")
-        st.info("세액공제 O / X는 계좌 카테고리 총액 기준으로 목표 비중을 계산하고, 계좌별 금액 비중을 반영해 배분합니다. IRP가 있는 카테고리는 금·미국채·KOFR를 우선 IRP에 배치해 IRP 30% 안전자산 룰을 최대한 맞춥니다.")
+        st.info("세액공제 O / X는 계좌 카테고리 총액 기준으로 목표 비중을 계산하고, 계좌별 금액 비중을 반영해 배분합니다. IRP가 있는 카테고리는 금·미국채·KOFR를 우선 IRP에 배치해 IRP 30% 안전자산 룰을 최대한 맞춥니다. CSV의 '현금'은 실제 현금으로 간주하며 KOFR와 별개로 보아 리밸런싱 대상에서 제외합니다.")
 
         target_view = []
-        for cat_name, targets in CATEGORY_TARGETS.items():
+        for cat_name in CATEGORY_ORDER:
+            targets = CATEGORY_TARGETS.get(cat_name, {})
             for asset, weight in targets.items():
                 target_view.append({'카테고리': cat_name, '자산군': display_asset_group(asset), '목표 비중': weight * 100})
         st.dataframe(pd.DataFrame(target_view), use_container_width=True, hide_index=True)
@@ -742,11 +777,15 @@ try:
             if plan_frames:
                 result_df = pd.concat(plan_frames, ignore_index=True)
                 result_df = result_df[result_df['현재가'] > 0].copy()
-                result_df = result_df.sort_values(['계좌카테고리', '계좌명', '자산군', '예상주문'], ascending=[True, True, True, False])
+                result_df['_category_order'] = result_df['계좌카테고리'].map(CATEGORY_ORDER_MAP).fillna(999).astype(int)
+                result_df['_asset_order'] = result_df['계좌카테고리'].map(lambda x: CATEGORY_TARGETS.get(x, {})).combine(result_df['자산군'], lambda tgt, asset: get_target_order_map(tgt).get(asset, 999) if isinstance(tgt, dict) else 999)
+                result_df = result_df.sort_values(['_category_order', '계좌명', '_asset_order', '예상주문'], ascending=[True, True, True, False])
 
-                for cat_name in result_df['계좌카테고리'].unique():
+                for cat_name in CATEGORY_ORDER:
                     st.markdown(f"### {cat_name}")
                     sub = result_df[result_df['계좌카테고리'] == cat_name].copy()
+                    if sub.empty:
+                        continue
                     st.dataframe(
                         sub.style.applymap(
                             lambda x: 'color: #d32f2f' if x > 0 else 'color: #1976d2',
