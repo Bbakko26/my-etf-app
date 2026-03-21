@@ -2,12 +2,46 @@ import streamlit as st
 import pandas as pd
 
 # -----------------------------
-# 공통 필터: 수량 0 제거
+# 공통 표시 필터
+# 기본값: 수량 0 / 평가액 0 / 비중 0.1% 이하 자동 제거
+# 토글을 켜면 전체 행을 다시 볼 수 있음
 # -----------------------------
+DISPLAY_WEIGHT_THRESHOLD = 0.1
+
+def _first_existing_col(df, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+def filter_display_rows(df, show_all=False, min_weight=DISPLAY_WEIGHT_THRESHOLD):
+    if df is None:
+        return df
+    if show_all:
+        return df.copy()
+
+    out = df.copy()
+
+    qty_col = _first_existing_col(out, ['보유수량', '수량', 'quantity', 'qty'])
+    if qty_col is not None:
+        qty_num = pd.to_numeric(out[qty_col], errors='coerce').fillna(0)
+        out = out[qty_num > 0].copy()
+
+    value_col = _first_existing_col(out, ['평가금액', '평가액'])
+    if value_col is not None:
+        value_num = pd.to_numeric(out[value_col], errors='coerce').fillna(0)
+        out = out[value_num > 0].copy()
+
+    weight_col = _first_existing_col(out, ['비중'])
+    if weight_col is not None:
+        weight_num = pd.to_numeric(out[weight_col], errors='coerce').fillna(0)
+        out = out[weight_num.abs() >= float(min_weight)].copy()
+
+    return out
+
 def filter_zero_quantity(df):
-    if '수량' in df.columns:
-        return df[df['수량'].fillna(0) != 0]
-    return df
+    # 하위 호환용 이름 유지
+    return filter_display_rows(df, show_all=False, min_weight=DISPLAY_WEIGHT_THRESHOLD)
 
 import FinanceDataReader as fdr
 import plotly.graph_objects as go
@@ -559,7 +593,14 @@ try:
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
     c3.metric("누적 수익", f"{(total_profit / total_seed * 100) if total_seed > 0 else 0:.2f}%", f"{total_profit:+,.0f}원")
 
-    tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
+    st.caption("기본값으로 수량 0 / 평가액 0 / 비중 0.1% 이하 행은 자동으로 숨김 처리됩니다.")
+col_filter1, col_filter2 = st.columns([1, 1])
+with col_filter1:
+    show_all_rows = st.toggle("숨김 행 포함해서 보기", value=False, help="켜면 수량 0, 평가액 0, 비중 0.1% 이하 행도 다시 표시합니다.")
+with col_filter2:
+    display_weight_threshold = st.number_input("비중 표시 최소값(%)", min_value=0.0, value=float(DISPLAY_WEIGHT_THRESHOLD), step=0.1, help="이 값 미만의 비중 행은 기본적으로 숨깁니다.")
+
+tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
 
     # 1. 종목 상세
     with tabs[0]:
@@ -582,6 +623,8 @@ try:
             get_styled_df(
                 sum_df,
                 ['자산군_표시', '약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'],
+                show_all=show_all_rows,
+                min_weight=display_weight_threshold,
             ),
             use_container_width=True,
             hide_index=True,
@@ -592,8 +635,10 @@ try:
         detail_df = asset_df[asset_df['종목명'] == sel_name].copy()
         st.dataframe(
             get_styled_df(
-                detail_df[detail_df['보유수량'] > 0],
+                detail_df,
                 ['계좌명', '종목코드', '보유수량', '매수평단', '현재가', '평가금액', '수익률'],
+                show_all=show_all_rows,
+                min_weight=display_weight_threshold,
             ),
             use_container_width=True,
             hide_index=True,
@@ -661,7 +706,7 @@ try:
 
         grp_df = add_sort_columns(grp_df, asset_col='자산군', amount_col='평가금액', targets_dict=total_target)
         grp_df = grp_df.sort_values(['_asset_order', '평가금액', '자산군_표시'], ascending=[True, False, True])
-        st.dataframe(filter_zero_quantity(get_styled_df(grp_df, ['자산군_표시', '평가금액', '비중', '목표', '차이'])), use_container_width=True, hide_index=True)
+        st.dataframe(get_styled_df(grp_df, ['자산군_표시', '평가금액', '비중', '목표', '차이'], show_all=show_all_rows, min_weight=display_weight_threshold), use_container_width=True, hide_index=True)
 
     # 3. 카테고리 분석
     with tabs[2]:
@@ -692,6 +737,8 @@ try:
                     target_map={k: v * 100 for k, v in CATEGORY_TARGETS.get(cat_name, {}).items()},
                     title=f"{cat_name} 현재 비중 vs 목표 비중",
                     height=DONUT_OVERALL_HEIGHT,  # ← 카테고리 차트 크기 조절
+                    current_domain=DONUT_CURRENT_DOMAIN,
+                    target_domain=DONUT_TARGET_DOMAIN,
                 ),
                 use_container_width=True,
                 key=f"cat_dual_{cat_name}",
@@ -705,7 +752,7 @@ try:
             detail_cat_df = add_sort_columns(detail_cat_df, asset_col='자산군', amount_col='평가금액', targets_dict=CATEGORY_TARGETS.get(cat_name, {}))
             detail_cat_df = detail_cat_df.sort_values(['_account_order', '_asset_order', '평가금액', '약식종목명'], ascending=[True, True, False, True])
             st.dataframe(
-                get_styled_df(detail_cat_df, ['계좌명', '자산군_표시', '약식종목명', '평가금액', '비중', '수익률']),
+                get_styled_df(detail_cat_df, ['계좌명', '자산군_표시', '약식종목명', '평가금액', '비중', '수익률'], show_all=show_all_rows, min_weight=display_weight_threshold),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -723,7 +770,7 @@ try:
             a_df = add_sort_columns(a_df, asset_col='자산군', amount_col='평가금액', targets_dict=CATEGORY_TARGETS.get(acc_category, {}))
             a_df = a_df.sort_values(['_asset_order', '평가금액', '약식종목명'], ascending=[True, False, True])
             st.dataframe(
-                get_styled_df(a_df, ['자산군_표시', '약식종목명', '보유수량', '현재가', '평가금액', '비중', '수익률']),
+                get_styled_df(a_df, ['자산군_표시', '약식종목명', '보유수량', '현재가', '평가금액', '비중', '수익률'], show_all=show_all_rows, min_weight=display_weight_threshold),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -758,6 +805,8 @@ try:
                         target_map={'환노출': t_fx['노출'], '환헤지': t_fx['헤지']},
                         title=f"{cat_name} - {display_asset_group(target_asset)} 환노출/헤지",
                         height=DONUT_FX_HEIGHT,  # ← 환율 차트 크기 조절
+                        current_domain=DONUT_FX_CURRENT_DOMAIN,
+                        target_domain=DONUT_FX_TARGET_DOMAIN,
                     ),
                     use_container_width=True,
                     key=f"fx_dual_{cat_name}_{target_asset}",
@@ -774,7 +823,7 @@ try:
             targets = CATEGORY_TARGETS.get(cat_name, {})
             for asset, weight in targets.items():
                 target_view.append({'카테고리': cat_name, '자산군': display_asset_group(asset), '목표 비중': weight * 100})
-        st.dataframe(filter_zero_quantity(pd.DataFrame(target_view)), use_container_width=True, hide_index=True)
+        st.dataframe(filter_display_rows(pd.DataFrame(target_view), show_all=show_all_rows, min_weight=display_weight_threshold), use_container_width=True, hide_index=True)
 
         if st.button("🔄 리밸런싱 수량 계산"):
             plan_frames = []
@@ -806,6 +855,8 @@ try:
                 for cat_name in CATEGORY_ORDER:
                     st.markdown(f"### {cat_name}")
                     sub = result_df[result_df['계좌카테고리'] == cat_name].copy()
+                    if not show_all_rows:
+                        sub = sub[pd.to_numeric(sub['현재금액'], errors='coerce').fillna(0) > 0].copy()
                     if sub.empty:
                         continue
                     st.dataframe(
@@ -829,6 +880,7 @@ try:
             if rule_frames:
                 st.markdown("### IRP 안전자산 30% 점검")
                 rule_df = pd.concat(rule_frames, ignore_index=True)
+                rule_df = filter_display_rows(rule_df, show_all=show_all_rows, min_weight=display_weight_threshold)
                 st.dataframe(
                     rule_df.style.format({
                         '현재 안전자산 비중': '{:.1f}%',
