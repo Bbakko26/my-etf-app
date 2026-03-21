@@ -20,29 +20,29 @@ def load_data():
     if '자산군' not in df.columns: df['자산군'] = df['약식종목명']
     return df
 
-# 📍 [FIX] 잔상 애니메이션 함수 (opacity 위치 수정)
+# 📍 애니메이션 최적화 함수 (프레임 속도 및 부드러움 조정)
 def create_overlay_ani_pie(labels, current_vals, target_vals, title):
-    colors = px.colors.qualitative.Plotly
+    colors = px.colors.qualitative.Pastel # 눈이 편안한 파스텔톤 사용
     color_map = {label: colors[i % len(colors)] for i, label in enumerate(labels)}
 
     fig = go.Figure(
         layout=go.Layout(
-            title=title,
+            title=dict(text=title, font=dict(size=14)),
             updatemenus=[dict(
-                type="buttons", x=0.1, y=1.2,
-                buttons=[dict(label="▶ 리밸런싱 시뮬레이션", method="animate", 
-                             args=[None, {"frame": {"duration": 1200, "redraw": True}, "fromcurrent": True, "transition": {"duration": 600}}])]
+                type="buttons", x=0.1, y=1.15,
+                buttons=[dict(label="▶ 시뮬레이션 (As-Is ↔ To-Be)", method="animate", 
+                             args=[None, {"frame": {"duration": 800, "redraw": True}, "fromcurrent": True, "transition": {"duration": 500, "easing": "cubic-in-out"}}])]
             )]
         ),
         data=[
-            # [뒤쪽: 목표] Marker가 아닌 Trace 수준에서 opacity 설정
-            go.Pie(labels=labels, values=target_vals, hole=0.6, sort=False, opacity=0.4,
+            # [뒤쪽: 목표 잔상]
+            go.Pie(labels=labels, values=target_vals, hole=0.6, sort=False, opacity=0.3,
                    marker=dict(colors=[color_map[l] for l in labels]),
-                   name="Target", domain={'x': [0, 1], 'y': [0, 1]}),
-            # [앞쪽: 현재]
+                   hoverinfo="label+percent", name="Target", domain={'x': [0, 1], 'y': [0, 1]}),
+            # [앞쪽: 현재 상태]
             go.Pie(labels=labels, values=current_vals, hole=0.5, sort=False,
-                   marker=dict(colors=[color_map[l] for l in labels]),
-                   name="As-Is", domain={'x': [0, 1], 'y': [0, 1]})
+                   marker=dict(colors=[color_map[l] for l in labels], line=dict(color='#FFFFFF', width=2)),
+                   hoverinfo="label+percent", name="As-Is", domain={'x': [0, 1], 'y': [0, 1]})
         ],
         frames=[
             go.Frame(data=[go.Pie(values=target_vals), go.Pie(values=current_vals)], name="f1"),
@@ -50,29 +50,11 @@ def create_overlay_ani_pie(labels, current_vals, target_vals, title):
             go.Frame(data=[go.Pie(values=target_vals), go.Pie(values=current_vals)], name="f3")
         ]
     )
-    fig.update_layout(height=380, margin=dict(t=80, b=10), legend=dict(orientation="h", y=-0.1))
+    fig.update_layout(height=400, margin=dict(t=80, b=20), legend=dict(orientation="h", y=-0.1))
     return fig
 
 # 스타일 설정
-st.markdown("<style>html,body,[class*='css']{font-size:12px!important;}h1{font-size:1.1rem!important;}[data-testid='stMetricValue']{font-size:1rem!important;}.stDataFrame div{font-size:11px!important;}</style>", unsafe_allow_html=True)
-
-def safe_format(val):
-    try: return f"{float(val):,.0f}"
-    except: return val
-
-def get_styled_df(target_df, cols_to_show):
-    available_cols = [c for c in cols_to_show if c in target_df.columns]
-    df_view = target_df[available_cols].copy().astype(object)
-    if '종목코드' in target_df.columns:
-        is_cash = target_df['종목코드'].str.upper() == 'CASH'
-        for c in ['보유수량', '매수평단', '현재가']:
-            if c in df_view.columns: df_view.loc[is_cash, c] = "-"
-    rename_map = {'계좌명':'계좌', '약식종목명':'종목', '보유수량':'수량', '매수평단':'평단', '평가금액':'평가액'}
-    df_view = df_view.rename(columns=rename_map)
-    format_rules = {'평가액': '{:,.0f}', '수익률': '{:.2f}%', '비중': '{:.1f}%', '목표': '{:.1f}%', '차이': '{:+.1f}%'}
-    for col in ['수량', '평단', '현재가']:
-        if col in df_view.columns: format_rules[col] = lambda x: safe_format(x)
-    return df_view.style.format(format_rules)
+st.markdown("<style>html,body,[class*='css']{font-size:12px!important;}h1{font-size:1.1rem!important;}[data-testid='stMetricValue']{font-size:1rem!important;}</style>", unsafe_allow_html=True)
 
 try:
     df_raw = load_data()
@@ -81,7 +63,6 @@ try:
     
     # --- 📍 [TARGET_SETTING] ---
     total_target = {"나스닥100": 35.0, "S&P500": 35.0, "국내 ETF": 10.0, "금": 5.0, "현금": 15.0}
-    # 카테고리 그룹화 목표 (3번 탭용)
     group_targets = {
         "세액공제 계좌": {"나스닥100": 40.0, "S&P500": 40.0, "국내 ETF": 10.0, "금": 5.0, "현금": 5.0},
         "ISA": {"다우존스": 50.0, "S&P500": 30.0, "현금": 20.0}
@@ -89,9 +70,8 @@ try:
     code_map = {"S&P500": {"노출": "360750", "헤지": "448290"}, "나스닥100": {"노출": "133690", "헤지": "448300"}, "다우존스": {"노출": "458730", "헤지": "452250"}}
     # --------------------------
 
-    with st.spinner('실시간 데이터 업데이트 중...'):
-        unique_codes = asset_df['종목코드'].unique()
-        price_map = {code: (fdr.DataReader(code).tail(1)['Close'].iloc[-1] if code.upper() not in ['CASH','현금','NAN',''] else 1.0) for code in unique_codes}
+    with st.spinner('데이터 업데이트 중...'):
+        price_map = {code: (fdr.DataReader(code).tail(1)['Close'].iloc[-1] if code.upper() not in ['CASH','현금'] else 1.0) for code in asset_df['종목코드'].unique()}
         current_fx = float(fdr.DataReader('USD/KRW').tail(1)['Close'].iloc[-1])
 
     asset_df['현재가'] = asset_df['종목코드'].map(price_map).fillna(0)
@@ -108,79 +88,64 @@ try:
 
     tabs = st.tabs(["1. 종목 상세", "2. 비중 및 리밸런싱", "3. 카테고리 분석", "4. 계좌별", "5. 환율관리"])
 
-    # --- 1. 종목 상세 ---
+    # 1. 종목 상세 (기존 로직 유지)
     with tabs[0]:
         sum_df = asset_df.groupby(['약식종목명', '종목코드', '자산군', '종목명']).agg({'보유수량':'sum', '매수금액':'sum', '평가금액':'sum'}).reset_index()
         sum_df['현재가'] = sum_df['종목코드'].map(price_map).fillna(0)
-        sum_df['매수평단'] = sum_df['매수금액'] / sum_df['보유수량']
         sum_df['수익률'] = (sum_df['평가금액'] - sum_df['매수금액']) / sum_df['매수금액'] * 100
-        st.dataframe(get_styled_df(sum_df.sort_values('평가금액', ascending=False), ['약식종목명', '자산군', '보유수량', '매수평단', '현재가', '평가금액', '수익률']), use_container_width=True, hide_index=True)
+        st.dataframe(sum_df.sort_values('평가금액', ascending=False), use_container_width=True, hide_index=True)
         st.divider()
         sel_name = st.selectbox("종목 선택", sum_df['종목명'].unique())
         detail_df = asset_df[asset_df['종목명'] == sel_name].copy()
         if not detail_df.empty and detail_df['종목코드'].iloc[0].upper() != "CASH":
-            hist_data = fdr.DataReader(detail_df['종목코드'].iloc[0]).tail(120)
-            fig = go.Figure(data=[go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], increasing_line_color='#d32f2f', decreasing_line_color='#1976d2')])
-            avg_p = detail_df['매수금액'].sum() / detail_df['보유수량'].sum() if detail_df['보유수량'].sum() > 0 else 0
-            if avg_p > 0: fig.add_hline(y=avg_p, line_dash="dash", line_color="red", annotation_text=f"내 평단: {avg_p:,.0f}")
-            fig.update_layout(height=400, xaxis_rangeslider_visible=False)
+            hist = fdr.DataReader(detail_df['종목코드'].iloc[0]).tail(120)
+            fig = go.Figure(data=[go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'])])
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- 2. 비중 및 리밸런싱 ---
+    # 2. 비중 및 리밸런싱 (애니메이션 적용)
     with tabs[1]:
         grp_df = asset_df.groupby('자산군').agg({'평가금액':'sum'}).reset_index()
         grp_df['비중'] = (grp_df['평가금액'] / total_eval) * 100
         grp_df['목표'] = grp_df['자산군'].map(total_target).fillna(0)
-        grp_df['차이'] = grp_df['비중'] - grp_df['목표']
-        st.plotly_chart(create_overlay_ani_pie(grp_df['자산군'].tolist(), grp_df['비중'].tolist(), grp_df['목표'].tolist(), "전체 비중 잔상 시뮬레이션"), use_container_width=True)
-        st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '목표', '차이']), use_container_width=True, hide_index=True)
+        st.plotly_chart(create_overlay_ani_pie(grp_df['자산군'].tolist(), grp_df['비중'].tolist(), grp_df['목표'].tolist(), "전체 자산 배분 가이드"), use_container_width=True)
 
-    # --- 3. 카테고리 분석 (계좌 통합 및 매수 가이드) ---
+    # 3. 카테고리 분석 (📍 세액공제 통합 및 가이드)
     with tabs[2]:
         groups = {"세액공제 계좌": ["세액공제 O", "세액공제 X"], "ISA": ["ISA"]}
         for g_name, cats in groups.items():
             sub_df = asset_df[asset_df['계좌카테고리'].isin(cats)].copy()
             if not sub_df.empty:
-                st.subheader(f"🏦 {g_name} 통합 분석")
+                st.subheader(f"🏦 {g_name} 분석")
                 cat_eval = sub_df['평가금액'].sum()
                 sub_grp = sub_df.groupby('자산군').agg({'평가금액':'sum'}).reset_index()
                 sub_grp['비중'] = (sub_grp['평가금액'] / cat_eval) * 100
                 sub_grp['목표'] = sub_grp['자산군'].map(group_targets.get(g_name, {})).fillna(0)
                 sub_grp['차이'] = sub_grp['비중'] - sub_grp['목표']
                 
-                # 가이드 결론
-                recom_type = "헤지" if current_fx > 1380 else "노출"
+                # 가이드 결론 출력
+                recom_fx = "헤지" if current_fx > 1380 else "노출"
                 for _, row in sub_grp.iterrows():
                     if row['차이'] <= -3.0 and row['자산군'] in code_map:
-                        st.info(f"💡 **{row['자산군']} 부족**: 현재 환율 기준 **환{recom_type}형 ({code_map[row['자산군']][recom_type]})** 추가 매수를 권장합니다.")
+                        st.info(f"💡 **{row['자산군']} 추가 매수 필요**: 환{recom_fx}형 ({code_map[row['자산군']][recom_fx]}) 추천")
 
-                st.plotly_chart(create_overlay_ani_pie(sub_grp['자산군'].tolist(), sub_grp['비중'].tolist(), sub_grp['목표'].tolist(), f"{g_name} 비중 잔상"), use_container_width=True, key=f"ani_{g_name}")
-                st.dataframe(get_styled_df(sub_df.assign(비중=(sub_df['평가금액']/cat_eval)*100).sort_values('비중', ascending=False), ['계좌명', '약식종목명', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
+                st.plotly_chart(create_overlay_ani_pie(sub_grp['자산군'].tolist(), sub_grp['비중'].tolist(), sub_grp['목표'].tolist(), f"{g_name} 시뮬레이션"), use_container_width=True, key=f"ani_{g_name}")
+                st.markdown("---")
 
-    # --- 4. 계좌별 ---
-    with tabs[3]:
-        for acc in asset_df['계좌명'].unique():
-            a_df = asset_df[asset_df['계좌명'] == acc].copy()
-            st.markdown(f"### 🏦 {acc}")
-            a_df['비중'] = (a_df['평가금액'] / a_df['평가금액'].sum()) * 100
-            st.dataframe(get_styled_df(a_df.sort_values('비중', ascending=False), ['약식종목명', '보유수량', '현재가', '평가금액', '비중', '수익률']), use_container_width=True, hide_index=True)
-
-    # --- 5. 환율관리 ---
+    # 5. 환율관리 (As-Is vs To-Be 상세화)
     with tabs[4]:
-        st.subheader(f"🌎 실시간 환율: {current_fx:,.2f}원")
+        st.subheader(f"🌎 환율 가이드 (현재: {current_fx:,.0f}원)")
         t_fx = {"노출": 30, "헤지": 70} if current_fx > 1400 else ({"노출": 80, "헤지": 20} if current_fx < 1330 else {"노출": 50, "헤지": 50})
         fx_config = {"세액공제 O": ["S&P500", "나스닥100"], "세액공제 X": ["S&P500", "나스닥100"], "ISA": ["다우존스", "S&P500"]}
-        for cat_name, targets in fx_config.items():
-            st.markdown(f"### 🏦 {cat_name}")
-            for target_asset in targets:
-                fx_sub = asset_df[(asset_df['계좌카테고리'] == cat_name) & (asset_df['자산군'] == target_asset)].copy()
-                if not fx_sub.empty:
-                    st.write(f"#### 📊 {target_asset} (As-Is vs To-Be)")
-                    fx_sub['구분'] = fx_sub['약식종목명'].apply(lambda x: '환헤지' if '(H)' in x else '환노출')
-                    asis_grp = fx_sub.groupby('구분')['평가금액'].sum().reset_index()
+        for cat, targets in fx_config.items():
+            st.markdown(f"### 🏦 {cat}")
+            for asset in targets:
+                f_df = asset_df[(asset_df['계좌카테고리'] == cat) & (asset_df['자산군'] == asset)].copy()
+                if not f_df.empty:
+                    f_df['구분'] = f_df['약식종목명'].apply(lambda x: '환헤지' if '(H)' in x else '환노출')
+                    asis = f_df.groupby('구분')['평가금액'].sum().reset_index()
                     c1, c2 = st.columns(2)
-                    with c1: st.plotly_chart(px.pie(asis_grp, values='평가금액', names='구분', title="현재", hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}).update_layout(height=230), use_container_width=True, key=f"fx_asis_{cat_name}_{target_asset}")
-                    with c2: st.plotly_chart(px.pie(pd.DataFrame([{"구분":"환노출", "값":t_fx['노출']}, {"구분":"환헤지", "값":t_fx['헤지']}]), values='값', names='구분', title="목표", hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}).update_layout(height=230), use_container_width=True, key=f"fx_tobe_{cat_name}_{target_asset}")
+                    c1.plotly_chart(px.pie(asis, values='평가금액', names='구분', title=f"{asset} 현재", hole=0.5).update_layout(height=220), use_container_width=True, key=f"fx_is_{cat}_{asset}")
+                    c2.plotly_chart(px.pie(pd.DataFrame([{"구분":"환노출", "v":t_fx['노출']}, {"구분":"환헤지", "v":t_fx['헤지']}]), values='v', names='구분', title=f"{asset} 목표", hole=0.5).update_layout(height=220), use_container_width=True, key=f"fx_to_{cat}_{asset}")
 
 except Exception as e:
-    st.error(f"🚨 오류: {e}")
+    st.error(f"🚨 시스템 오류: {e}")
