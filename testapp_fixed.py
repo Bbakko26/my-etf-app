@@ -55,9 +55,9 @@ DONUT_FX_HEIGHT = 340        # 환율 도넛 높이
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
 DONUT_CURRENT_DOMAIN = {"x": [0.20, 0.80], "y": [0.20, 0.80]}   # 현재 도넛
-DONUT_TARGET_DOMAIN = {"x": [0.06, 0.90], "y": [0.06, 0.90]}     # 목표 도넛
+DONUT_TARGET_DOMAIN = {"x": [0.12, 0.88], "y": [0.12, 0.88]}     # 목표 도넛
 DONUT_FX_CURRENT_DOMAIN = {"x": [0.22, 0.78], "y": [0.22, 0.78]} # 환율 현재 도넛
-DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.88], "y": [0.08, 0.88]}  # 환율 목표 도넛
+DONUT_FX_TARGET_DOMAIN = {"x": [0.14, 0.86], "y": [0.14, 0.86]}  # 환율 목표 도넛
 
 # 환율관리 탭 도넛 색상
 FX_COLOR_MAP = {
