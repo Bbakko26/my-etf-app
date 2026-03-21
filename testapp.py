@@ -233,38 +233,93 @@ class PortfolioRebalancer:
                     with c1: st.plotly_chart(px.pie(asis_grp, values='평가금액', names='구분', title="현재", hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}).update_layout(height=230, margin=dict(t=30, b=10)), use_container_width=True, key=f"fx_asis_{cat_name}_{target_asset}")
                     with c2: st.plotly_chart(px.pie(pd.DataFrame([{"구분":"환노출", "값":t_fx['노출']}, {"구분":"환헤지", "값":t_fx['헤지']}]), values='값', names='구분', title="목표", hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}).update_layout(height=230, margin=dict(t=30, b=10)), use_container_width=True, key=f"fx_tobe_{cat_name}_{target_asset}")
             st.markdown("---")
+    
+    
     # --- 6. 리밸런싱
     with tabs[5]:
-    st.subheader("⚖️ 계좌별 통합 리밸런싱 제언")
-    
-    # 설정값 (사용자님의 포트폴리오 전략 반영)
-    targets = {'S&P500': 0.45, '나스닥100': 0.25, '금': 0.15, '미국국채': 0.10, 'KOFR': 0.05}
-    safe_list = ['금', '미국국채', 'KOFR']
-    
-    if st.button("🚀 현재가 기준 리밸런싱 계산"):
-        rebalancer = PortfolioRebalancer(targets, safe_list)
-        alloc_res, price_map = rebalancer.run(asset_df)
+        st.subheader("⚖️ 통합 목표 기반 리밸런싱")
         
-        rebal_data = []
-        for acc, assets in alloc_res.items():
-            for t, target_val in assets.items():
-                # 현재 보유 금액 확인
-                curr_val = asset_df[(asset_df['계좌명'] == acc) & (asset_df['약식종목명'] == t)]['평가금액'].sum()
-                price = price_map.get(t, 1)
-                diff_qty = int((target_val - curr_val) // price) if price > 0 else 0
-                
-                if diff_qty != 0:
-                    rebal_data.append({
-                        '계좌': acc, '종목': t, '현재가': price, 
-                        '목표액': target_val, '조정수량': diff_qty, '주문금액': diff_qty * price
-                    })
-        
-        if rebal_data:
-            res_df = pd.DataFrame(rebal_data)
-            st.dataframe(res_df.style.applymap(lambda x: 'color: red' if x > 0 else 'color: blue', subset=['조정수량'])
-                         .format({'목표액': '{:,.0f}', '현재가': '{:,.0f}', '주문금액': '{:,.0f}'}), 
-                         use_container_width=True, hide_index=True)
-        else:
-            st.info("현재 모든 계좌가 목표 비중 내에 있습니다.")
+        # 1. 사용자 정의 통합 목표 (수치 수정 가능)
+        # S&P500 45%, 나스닥 25%, 금 15%, 국채 10%, 현금 5%
+        target_weights = {
+            'S&P500': 0.45, '나스닥100': 0.25, 
+            '금': 0.15, '미국국채': 0.10, 'KOFR': 0.05
+        }
+        safe_assets = ['금', '미국국채', 'KOFR'] # IRP 안전자산 인정 종목
+
+        # 2. 리밸런싱 계산 엔진
+        def run_rebalance(df, targets, safes):
+            # 계좌별 잔액 합산
+            acc_balances = df.groupby('계좌명')['평가금액'].sum().to_dict()
+            total_val = sum(acc_balances.values())
+            
+            # 전체 자산 대비 종목별 목표 금액 (가중평균 기준)
+            overall_targets = {t: total_val * w for t, w in targets.items()}
+            allocation = {acc: {t: 0 for t in targets} for acc in acc_balances}
+            rem_targets = overall_targets.copy()
+
+            # [Step A] IRP 안전자산 30% 우선 할당 (성과급 변동 대응)
+            irp_accs = [a for a in acc_balances if 'IRP' in a]
+            for acc in irp_accs:
+                req_safe = acc_balances[acc] * 0.3
+                allocated = 0
+                for t in sorted(safes, key=lambda x: targets.get(x, 0), reverse=True):
+                    if allocated >= req_safe: break
+                    fill = min(rem_targets.get(t, 0), req_safe - allocated)
+                    allocation[acc][t] = fill
+                    allocated += fill
+                    rem_targets[t] -= fill
+
+            # [Step B] 나머지 잔액 배분
+            for acc, bal in acc_balances.items():
+                avail = bal - sum(allocation[acc].values())
+                rem_total = sum(rem_targets.values())
+                if rem_total > 0:
+                    for t in targets:
+                        if rem_targets[t] > 0:
+                            share = rem_targets[t] / rem_total
+                            add = min(rem_targets[t], avail * share)
+                            # IRP 70% 위험자산 캡 체크
+                            if 'IRP' in acc and t not in safes:
+                                limit = (bal * 0.7) - sum(v for k, v in allocation[acc].items() if k not in safes)
+                                add = min(add, max(0, limit))
+                            allocation[acc][t] += add
+                            rem_targets[t] -= add
+            return allocation
+
+        # 3. UI 및 결과 출력
+        col_t1, col_t2 = st.columns([1, 2])
+        col_t1.write("**🎯 통합 목표 비중**")
+        col_t1.json(target_weights)
+        col_t2.info(f"**🛡️ IRP 안전자산 가이드**\n대상: {', '.join(safes)}\n(계좌 잔액의 30% 우선 할당)")
+
+        if st.button("🔄 리밸런싱 수량 계산"):
+            alloc_result = run_rebalance(asset_df, target_weights, safe_assets)
+            
+            rebal_rows = []
+            for acc, assets in alloc_result.items():
+                for t, target_amt in assets.items():
+                    # 현재가 및 보유량 매칭
+                    row = asset_df[(asset_df['계좌명'] == acc) & (asset_df['약식종목명'] == t)]
+                    curr_price = row['현재가'].iloc[0] if not row.empty else price_map.get(t, 0)
+                    curr_val = row['평가금액'].sum()
+                    
+                    if curr_price > 0:
+                        diff_qty = int((target_amt - curr_val) // curr_price)
+                        if diff_qty != 0:
+                            rebal_rows.append({
+                                '계좌': acc, '종목': t, '현재가': curr_price,
+                                '목표금액': target_amt, '조정수량': diff_qty, '예상주문': diff_qty * curr_price
+                            })
+            
+            if rebal_rows:
+                st.dataframe(pd.DataFrame(rebal_rows).style.applymap(
+                    lambda x: 'color: #d32f2f' if x > 0 else 'color: #1976d2', subset=['조정수량']
+                ).format({'목표금액': '{:,.0f}', '현재가': '{:,.0f}', '예상주문': '{:,.0f}'}), 
+                use_container_width=True, hide_index=True)
+            else:
+                st.success("현재 비중이 완벽합니다!")
+
+# --- 최하단 마감 (반드시 이 구조여야 함) ---
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
