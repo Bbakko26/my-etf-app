@@ -78,6 +78,55 @@ try:
     total_seed = (seed_df['보유수량'] * seed_df['매수평단']).sum()
     total_profit = total_eval - total_seed
 
+class PortfolioRebalancer:
+    def __init__(self, target_weights, safe_assets):
+        self.target_weights = target_weights  # 예: {'S&P500': 0.45, '나스닥100': 0.25, ...}
+        self.safe_assets = safe_assets        # IRP용 안전자산 리스트
+
+    def run(self, df):
+        # 실시간 잔액 및 가격 정보 추출
+        account_balances = df.groupby('계좌명')['평가금액'].sum().to_dict()
+        total_assets = sum(account_balances.values())
+        current_prices = df.set_index('약식종목명')['현재가'].to_dict()
+        
+        # 전체 통합 목표 금액 설정
+        overall_targets = {t: total_assets * w for t, w in self.target_weights.items()}
+        allocation = {acc: {t: 0 for t in self.target_weights} for acc in account_balances}
+        remaining_targets = overall_targets.copy()
+
+        # [단계 1] IRP 안전자산 30% 우선 할당 (성과급 변동 대응 핵심)
+        irp_accs = [a for a in account_balances if 'IRP' in a]
+        for acc in irp_accs:
+            req_safe = account_balances[acc] * 0.3
+            allocated = 0
+            # 안전자산 중 목표 비중이 높은 순서대로 IRP에 먼저 채움
+            for t in sorted(self.safe_assets, key=lambda x: self.target_weights.get(x, 0), reverse=True):
+                if allocated >= req_safe: break
+                fill = min(remaining_targets.get(t, 0), req_safe - allocated)
+                allocation[acc][t] = fill
+                allocated += fill
+                remaining_targets[t] -= fill
+
+        # [단계 2] 나머지 잔액을 가중평균으로 배분 (전체 비중 유지)
+        for acc, bal in account_balances.items():
+            avail = bal - sum(allocation[acc].values())
+            rem_total = sum(remaining_targets.values())
+            if rem_total > 0:
+                for t in self.target_weights:
+                    if remaining_targets[t] > 0:
+                        share = remaining_targets[t] / rem_total
+                        add = min(remaining_targets[t], avail * share)
+                        
+                        # IRP 위험자산 70% 캡(Cap) 재검증
+                        if 'IRP' in acc and t not in self.safe_assets:
+                            limit = (bal * 0.7) - sum(v for k, v in allocation[acc].items() if k not in self.safe_assets)
+                            add = min(add, max(0, limit))
+                            
+                        allocation[acc][t] += add
+                        remaining_targets[t] -= add
+
+        return allocation, current_prices
+
     # 상단 대시보드
     st.title("💰 Family Portfolio")
     c1, c2, c3 = st.columns(3)
@@ -85,7 +134,7 @@ try:
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
     c3.metric("누적 수익", f"{(total_profit/total_seed*100) if total_seed > 0 else 0:.2f}%", f"{total_profit:+,.0f}원")
 
-    tabs = st.tabs(["1. 종목 상세", "2. 비중 및 리밸런싱", "3. 카테고리 분석", "4. 계좌별", "5. 환율관리"])
+    tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
 
     # --- 1. 종목 상세 ---
     with tabs[0]:
@@ -113,7 +162,7 @@ try:
                     st.plotly_chart(fig, use_container_width=True, key=f"candle_{code}")
                 except: st.info("차트 데이터를 불러올 수 없습니다.")
 
-    # --- 2. 비중 및 리밸런싱 ---
+    # --- 2. 전체 비중 ---
     with tabs[1]:
         st.subheader("📊 전체 포트폴리오 상태")
         grp_df = asset_df.groupby('자산군').agg({'평가금액':'sum'}).reset_index()
@@ -184,6 +233,38 @@ try:
                     with c1: st.plotly_chart(px.pie(asis_grp, values='평가금액', names='구분', title="현재", hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}).update_layout(height=230, margin=dict(t=30, b=10)), use_container_width=True, key=f"fx_asis_{cat_name}_{target_asset}")
                     with c2: st.plotly_chart(px.pie(pd.DataFrame([{"구분":"환노출", "값":t_fx['노출']}, {"구분":"환헤지", "값":t_fx['헤지']}]), values='값', names='구분', title="목표", hole=0.5, color='구분', color_discrete_map={'환노출':'#EF553B', '환헤지':'#636EFA'}).update_layout(height=230, margin=dict(t=30, b=10)), use_container_width=True, key=f"fx_tobe_{cat_name}_{target_asset}")
             st.markdown("---")
-
+    # --- 6. 리밸런싱
+    with tabs[5]:
+    st.subheader("⚖️ 계좌별 통합 리밸런싱 제언")
+    
+    # 설정값 (사용자님의 포트폴리오 전략 반영)
+    targets = {'S&P500': 0.45, '나스닥100': 0.25, '금': 0.15, '미국국채': 0.10, 'KOFR': 0.05}
+    safe_list = ['금', '미국국채', 'KOFR']
+    
+    if st.button("🚀 현재가 기준 리밸런싱 계산"):
+        rebalancer = PortfolioRebalancer(targets, safe_list)
+        alloc_res, price_map = rebalancer.run(asset_df)
+        
+        rebal_data = []
+        for acc, assets in alloc_res.items():
+            for t, target_val in assets.items():
+                # 현재 보유 금액 확인
+                curr_val = asset_df[(asset_df['계좌명'] == acc) & (asset_df['약식종목명'] == t)]['평가금액'].sum()
+                price = price_map.get(t, 1)
+                diff_qty = int((target_val - curr_val) // price) if price > 0 else 0
+                
+                if diff_qty != 0:
+                    rebal_data.append({
+                        '계좌': acc, '종목': t, '현재가': price, 
+                        '목표액': target_val, '조정수량': diff_qty, '주문금액': diff_qty * price
+                    })
+        
+        if rebal_data:
+            res_df = pd.DataFrame(rebal_data)
+            st.dataframe(res_df.style.applymap(lambda x: 'color: red' if x > 0 else 'color: blue', subset=['조정수량'])
+                         .format({'목표액': '{:,.0f}', '현재가': '{:,.0f}', '주문금액': '{:,.0f}'}), 
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("현재 모든 계좌가 목표 비중 내에 있습니다.")
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
