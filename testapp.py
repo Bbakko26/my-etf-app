@@ -78,7 +78,7 @@ try:
     total_seed = (seed_df['보유수량'] * seed_df['매수평단']).sum()
     total_profit = total_eval - total_seed
 
-    class PortfolioRebalancer:
+class PortfolioRebalancer:
     def __init__(self, target_weights, safe_assets):
         self.target_weights = target_weights  # 예: {'S&P500': 0.45, '나스닥100': 0.25, ...}
         self.safe_assets = safe_assets        # IRP용 안전자산 리스트
