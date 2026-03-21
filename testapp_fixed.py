@@ -49,13 +49,21 @@ FX_TARGETS_LOW = {"환노출": 80, "환헤지": 20}
 
 # 수동 조절용
 DONUT_OUTER_OPACITY = 0.50
-DONUT_OVERALL_HEIGHT = 460
-DONUT_FX_HEIGHT = 340
+DONUT_OVERALL_HEIGHT = 460   # 전체/카테고리 도넛 높이
+DONUT_FX_HEIGHT = 340        # 환율 도넛 높이
 
-DONUT_CURRENT_DOMAIN = {"x": [0.20, 0.80], "y": [0.20, 0.80]}
-DONUT_TARGET_DOMAIN = {"x": [0.06, 0.94], "y": [0.06, 0.94]}
-DONUT_FX_CURRENT_DOMAIN = {"x": [0.22, 0.78], "y": [0.22, 0.78]}
-DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.92], "y": [0.08, 0.92]}
+# 도넛 크기 조절
+# 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
+DONUT_CURRENT_DOMAIN = {"x": [0.20, 0.80], "y": [0.20, 0.80]}   # 현재 도넛
+DONUT_TARGET_DOMAIN = {"x": [0.06, 0.94], "y": [0.06, 0.94]}     # 목표 도넛
+DONUT_FX_CURRENT_DOMAIN = {"x": [0.22, 0.78], "y": [0.22, 0.78]} # 환율 현재 도넛
+DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.92], "y": [0.08, 0.92]}  # 환율 목표 도넛
+
+# 환율관리 탭 도넛 색상
+FX_COLOR_MAP = {
+    "환노출": "#1f77b4",  # 파란색 계열
+    "환헤지": "#ff7f0e",  # 주황색 계열
+}
 
 DISPLAY_WEIGHT_THRESHOLD = 0.1
 
@@ -190,6 +198,8 @@ def make_dual_donut(
     target_domain,
     current_hole=0.48,
     target_hole=0.72,
+    current_color_map=None,
+    target_color_map=None,
 ):
     current_names = [str(x) for x in current_df[current_name_col].fillna("").tolist()]
     target_names = [display_asset_group(k) for k in target_map.keys()]
@@ -201,6 +211,9 @@ def make_dual_donut(
     target_vals = [target_display_map.get(name, 0.0) for name in names]
 
     fig = go.Figure()
+    current_colors = [current_color_map.get(name) for name in names] if current_color_map else None
+    target_colors = [target_color_map.get(name) for name in names] if target_color_map else None
+
     fig.add_trace(
         go.Pie(
             labels=names,
@@ -210,7 +223,7 @@ def make_dual_donut(
             direction="clockwise",
             textinfo="label+percent",
             domain=current_domain,
-            marker=dict(line=dict(color="white", width=1)),
+            marker=dict(colors=current_colors, line=dict(color="white", width=1)),
             name="현재",
         )
     )
@@ -224,7 +237,7 @@ def make_dual_donut(
             textinfo="none",
             opacity=DONUT_OUTER_OPACITY,
             domain=target_domain,
-            marker=dict(line=dict(color="white", width=1)),
+            marker=dict(colors=target_colors, line=dict(color="white", width=1)),
             hovertemplate="<b>%{label}</b><br>목표: %{value:.1f}%<extra></extra>",
             name="목표",
         )
@@ -305,6 +318,80 @@ def get_usdkrw():
     except Exception:
         pass
     return 1360.0
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_history_data(code, days=120):
+    code = str(code).strip()
+    if code.upper() in {"", "NAN", "CASH", "SEED"}:
+        return pd.DataFrame()
+    try:
+        hist = fdr.DataReader(code)
+        if hist is None or hist.empty:
+            return pd.DataFrame()
+        hist = hist.tail(days).copy()
+        hist.index = pd.to_datetime(hist.index)
+        return hist
+    except Exception:
+        return pd.DataFrame()
+
+
+def get_daily_change_info(code):
+    hist = get_history_data(code, days=5)
+    if hist is None or hist.empty or "Close" not in hist.columns or len(hist) < 2:
+        return None, None, None
+    latest_close = float(hist["Close"].iloc[-1])
+    prev_close = float(hist["Close"].iloc[-2])
+    if prev_close == 0:
+        return latest_close, prev_close, None
+    pct = (latest_close - prev_close) / prev_close * 100.0
+    return latest_close, prev_close, pct
+
+
+def build_daily_alerts(asset_df, drop_threshold=-2.5):
+    alerts = []
+    unique_rows = (
+        asset_df[["종목코드", "약식종목명"]]
+        .dropna()
+        .drop_duplicates()
+        .to_dict("records")
+    )
+    for row in unique_rows:
+        code = str(row["종목코드"]).strip()
+        if code.upper() in {"", "NAN", "CASH", "SEED"}:
+            continue
+        _, _, pct = get_daily_change_info(code)
+        if pct is not None and pct <= drop_threshold:
+            alerts.append((row["약식종목명"], code, pct))
+    return alerts
+
+
+def make_price_chart(hist_df, avg_price=None, title="최근 120일 차트"):
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=hist_df.index,
+            y=hist_df["Close"],
+            mode="lines",
+            name="종가",
+        )
+    )
+    if avg_price is not None and float(avg_price) > 0:
+        fig.add_hline(
+            y=float(avg_price),
+            line_dash="dash",
+            annotation_text=f"내 평단 {float(avg_price):,.0f}",
+            annotation_position="top left",
+        )
+    fig.update_layout(
+        title=title,
+        height=360,
+        margin=dict(l=20, r=20, t=50, b=20),
+        xaxis_title="날짜",
+        yaxis_title="가격",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    return fig
 
 
 def prepare_asset_df(df_raw):
@@ -547,6 +634,11 @@ try:
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
     c3.metric("누적 수익", f"{(total_profit / total_seed * 100) if total_seed > 0 else 0:.2f}%", f"{total_profit:+,.0f}원")
 
+    daily_alerts = build_daily_alerts(asset_df, drop_threshold=-2.5)
+    if daily_alerts:
+        lines = [f"- {name} ({code}): {pct:.2f}%" for name, code, pct in sorted(daily_alerts, key=lambda x: x[2])]
+        st.warning("전일 대비 2.5% 이상 하락한 종목이 있습니다.\n" + "\n".join(lines))
+
     st.caption("기본값으로 수량 0 / 평가액 0 / 비중 0.1% 이하 행은 자동으로 숨김 처리됩니다.")
     f1, f2 = st.columns([1, 1])
     with f1:
@@ -588,6 +680,36 @@ try:
         selectable = sum_df["종목명"].fillna("").unique().tolist()
         selected_name = st.selectbox("종목 선택", selectable)
         detail_df = asset_df[asset_df["종목명"] == selected_name].copy()
+
+        if not detail_df.empty:
+            rep_row = detail_df.sort_values(["평가금액", "보유수량"], ascending=False).iloc[0]
+            sel_code = str(rep_row["종목코드"]).strip()
+            avg_price = 0.0
+            total_qty = float(pd.to_numeric(detail_df["보유수량"], errors="coerce").fillna(0).sum())
+            total_buy_amt = float(pd.to_numeric(detail_df["매수금액"], errors="coerce").fillna(0).sum())
+            if total_qty > 0:
+                avg_price = total_buy_amt / total_qty
+
+            latest_close, prev_close, daily_pct = get_daily_change_info(sel_code)
+            if daily_pct is not None:
+                color = "#d32f2f" if daily_pct > 0 else "#1976d2"
+                sign = "+" if daily_pct > 0 else ""
+                st.markdown(
+                    f"<div style='font-size:16px; font-weight:700; color:{color};'>전일 대비 {sign}{daily_pct:.2f}%</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption("전일 대비 데이터를 불러오지 못했습니다.")
+
+            hist_df = get_history_data(sel_code, days=120)
+            if hist_df is not None and not hist_df.empty:
+                st.plotly_chart(
+                    make_price_chart(hist_df, avg_price=avg_price, title=f"{selected_name} 최근 120일 차트"),
+                    use_container_width=True,
+                )
+            else:
+                st.info("120일 가격 차트를 불러오지 못했습니다.")
+
         st.dataframe(
             style_table(
                 detail_df,
@@ -748,6 +870,8 @@ try:
                         DONUT_FX_HEIGHT,
                         DONUT_FX_CURRENT_DOMAIN,
                         DONUT_FX_TARGET_DOMAIN,
+                        current_color_map=FX_COLOR_MAP,
+                        target_color_map=FX_COLOR_MAP,
                     ),
                     use_container_width=True,
                 )
