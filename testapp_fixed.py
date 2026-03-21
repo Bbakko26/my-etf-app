@@ -1,5 +1,14 @@
 import streamlit as st
 import pandas as pd
+
+# -----------------------------
+# 공통 필터: 수량 0 제거
+# -----------------------------
+def filter_zero_quantity(df):
+    if '수량' in df.columns:
+        return df[df['수량'].fillna(0) != 0]
+    return df
+
 import FinanceDataReader as fdr
 import plotly.graph_objects as go
 import plotly.express as px
@@ -59,6 +68,17 @@ CODE_MAP = {
 DONUT_OUTER_OPACITY = 0.5  # 바깥(Target) 도넛 투명도: 0.0~1.0
 DONUT_OVERALL_HEIGHT = 420  # 전체/카테고리 도넛 차트 높이
 DONUT_FX_HEIGHT = 320  # 환율 도넛 차트 높이
+
+# -----------------------------
+# 도넛 차트 스케일 조절값
+# 숫자를 직접 바꿔가면서 보기 좋게 맞추면 됨
+# 값이 작아질수록 더 바깥으로 커지고, 값이 커질수록 더 안쪽으로 작아짐
+# -----------------------------
+DONUT_CURRENT_DOMAIN = {'x': [0.16, 0.84], 'y': [0.16, 0.84]}  # 현재 비중(안쪽 도넛)
+DONUT_TARGET_DOMAIN = {'x': [0.03, 0.97], 'y': [0.03, 0.97]}   # 목표 비중(바깥 도넛)
+
+DONUT_FX_CURRENT_DOMAIN = {'x': [0.18, 0.82], 'y': [0.18, 0.82]}  # 환율 탭 현재 비중
+DONUT_FX_TARGET_DOMAIN = {'x': [0.05, 0.95], 'y': [0.05, 0.95]}   # 환율 탭 목표 비중
 
 
 def get_target_order_map(targets_dict):
@@ -632,6 +652,8 @@ try:
                 target_map={k: v for k, v in total_target.items()},
                 title="현재 비중 vs 목표 비중",
                 height=DONUT_OVERALL_HEIGHT,  # ← 전체 차트 크기 조절
+                current_domain=DONUT_CURRENT_DOMAIN,  # ← 현재 도넛 스케일
+                target_domain=DONUT_TARGET_DOMAIN,    # ← 목표 도넛 스케일
             ),
             use_container_width=True,
             key="p2_dual",
@@ -639,7 +661,7 @@ try:
 
         grp_df = add_sort_columns(grp_df, asset_col='자산군', amount_col='평가금액', targets_dict=total_target)
         grp_df = grp_df.sort_values(['_asset_order', '평가금액', '자산군_표시'], ascending=[True, False, True])
-        st.dataframe(get_styled_df(grp_df, ['자산군_표시', '평가금액', '비중', '목표', '차이']), use_container_width=True, hide_index=True)
+        st.dataframe(filter_zero_quantity(get_styled_df(grp_df, ['자산군_표시', '평가금액', '비중', '목표', '차이'])), use_container_width=True, hide_index=True)
 
     # 3. 카테고리 분석
     with tabs[2]:
@@ -752,7 +774,7 @@ try:
             targets = CATEGORY_TARGETS.get(cat_name, {})
             for asset, weight in targets.items():
                 target_view.append({'카테고리': cat_name, '자산군': display_asset_group(asset), '목표 비중': weight * 100})
-        st.dataframe(pd.DataFrame(target_view), use_container_width=True, hide_index=True)
+        st.dataframe(filter_zero_quantity(pd.DataFrame(target_view)), use_container_width=True, hide_index=True)
 
         if st.button("🔄 리밸런싱 수량 계산"):
             plan_frames = []
@@ -819,4 +841,3 @@ try:
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
-
