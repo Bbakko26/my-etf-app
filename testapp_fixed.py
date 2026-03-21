@@ -55,14 +55,14 @@ DONUT_FX_HEIGHT = 340        # 환율 도넛 높이
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
 DONUT_CURRENT_DOMAIN = {"x": [0.20, 0.80], "y": [0.20, 0.80]}   # 현재 도넛
-DONUT_TARGET_DOMAIN = {"x": [0.06, 0.94], "y": [0.06, 0.94]}     # 목표 도넛
+DONUT_TARGET_DOMAIN = {"x": [0.06, 0.90], "y": [0.06, 0.90]}     # 목표 도넛
 DONUT_FX_CURRENT_DOMAIN = {"x": [0.22, 0.78], "y": [0.22, 0.78]} # 환율 현재 도넛
-DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.92], "y": [0.08, 0.92]}  # 환율 목표 도넛
+DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.88], "y": [0.08, 0.88]}  # 환율 목표 도넛
 
 # 환율관리 탭 도넛 색상
 FX_COLOR_MAP = {
-    "환노출": "#1f77b4",  # 파란색 계열
-    "환헤지": "#ff7f0e",  # 주황색 계열
+    "환노출": "#ff7f0e",  # 파란색 계열
+    "환헤지": "#1f77b4",  # 주황색 계열
 }
 
 DISPLAY_WEIGHT_THRESHOLD = 0.1
@@ -646,7 +646,7 @@ try:
     with f2:
         display_weight_threshold = st.number_input("비중 표시 최소값(%)", min_value=0.0, value=float(DISPLAY_WEIGHT_THRESHOLD), step=0.1)
 
-    tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
+    tabs = st.tabs(["📊 종목 상세", "🍩 전체", "🏦 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
 
     # 1. 종목 상세
     with tabs[0]:
