@@ -189,7 +189,6 @@ def display_asset_group(value):
 
 def load_data():
     target_file = 'my_assets.csv'
-    try:
         df = pd.read_csv(target_file, encoding='utf-8-sig', dtype={'종목코드': str})
     except Exception:
         df = pd.read_csv(target_file, encoding='cp949', dtype={'종목코드': str})
@@ -228,7 +227,6 @@ st.markdown(
 
 
 def safe_format(val):
-    try:
         return f"{float(val):,.0f}"
     except Exception:
         return val
@@ -292,7 +290,6 @@ def get_price_data(codes_tuple):
         if code_str.upper() in ['CASH', '현금', 'NAN', '']:
             price_map[code] = 1.0
             continue
-        try:
             hist = fdr.DataReader(code_str)
             price_map[code] = float(hist.tail(1)['Close'].iloc[-1]) if not hist.empty else 0.0
         except Exception:
@@ -302,7 +299,6 @@ def get_price_data(codes_tuple):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_usdkrw():
-    try:
         return float(fdr.DataReader('USD/KRW').tail(1)['Close'].iloc[-1])
     except Exception:
         return 0.0
@@ -561,7 +557,6 @@ def build_category_rebalance_plan(category_df, category_name):
 # -----------------------------
 # 메인 앱
 # -----------------------------
-try:
     df_raw = load_data()
     seed_df = df_raw[df_raw['종목코드'].astype(str).str.upper() == 'SEED'].copy()
     asset_df = df_raw[df_raw['종목코드'].astype(str).str.upper() != 'SEED'].copy()
@@ -647,7 +642,6 @@ tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 �
         if not detail_df.empty:
             code = str(detail_df['종목코드'].iloc[0])
             if code.upper() not in ['CASH', '현금']:
-                try:
                     hist_data = fdr.DataReader(code).tail(120)
                     if not hist_data.empty:
                         fig = go.Figure(
