@@ -11,14 +11,14 @@ DISPLAY_WEIGHT_THRESHOLD = 0.1
 def _first_existing_col(df, candidates):
     for c in candidates:
         if c in df.columns:
-        return c
+            return c
     return None
 
 def filter_display_rows(df, show_all=False, min_weight=DISPLAY_WEIGHT_THRESHOLD):
     if df is None:
-        return df
+            return df
     if show_all:
-        return df.copy()
+            return df.copy()
 
     out = df.copy()
 
@@ -117,7 +117,7 @@ DONUT_FX_TARGET_DOMAIN = {'x': [0.05, 0.95], 'y': [0.05, 0.95]}   # 환율 탭 �
 
 def get_target_order_map(targets_dict):
     if not targets_dict:
-        return {}
+            return {}
     return {asset: idx for idx, (asset, _) in enumerate(sorted(targets_dict.items(), key=lambda x: (-x[1], display_asset_group(x[0]))))}
 
 
@@ -179,7 +179,7 @@ def make_dual_donut(current_df, current_value_col, current_name_col, target_map,
 def normalize_asset_group(value):
     raw = '' if pd.isna(value) else str(value).strip()
     if raw in DISPLAY_TO_CANONICAL:
-        return DISPLAY_TO_CANONICAL[raw]
+            return DISPLAY_TO_CANONICAL[raw]
     return raw
 
 
@@ -306,14 +306,14 @@ def get_usdkrw():
 
 def calc_return(eval_amt, buy_amt):
     if buy_amt and buy_amt != 0:
-        return (eval_amt - buy_amt) / buy_amt * 100
+            return (eval_amt - buy_amt) / buy_amt * 100
     return 0.0
 
 
 def build_overall_target_mix(asset_df):
     total_val = asset_df['평가금액'].sum()
     if total_val <= 0:
-        return {}
+            return {}
 
     overall_amt = {}
     for cat_name, targets in CATEGORY_TARGETS.items():
@@ -378,7 +378,7 @@ def build_virtual_order_row(target_asset):
         short_name = display_asset_group(target_asset)
 
     if not code:
-        return None
+            return None
 
     curr_price = price_map.get(code, 0.0) if 'price_map' in globals() else 0.0
     return pd.Series({
@@ -394,7 +394,7 @@ def build_virtual_order_row(target_asset):
 def choose_order_row(acc_df, target_asset):
     candidates = acc_df[acc_df['자산군'] == target_asset].copy()
     if candidates.empty:
-        return build_virtual_order_row(target_asset)
+            return build_virtual_order_row(target_asset)
 
     if target_asset in {'S&P500', '나스닥100', '다우존스'}:
         current_fx = get_usdkrw()
@@ -412,7 +412,7 @@ def choose_order_row(acc_df, target_asset):
     if not positive_price.empty:
         positive_holding = positive_price[positive_price['보유수량'] > 0]
         if not positive_holding.empty:
-        return positive_holding.sort_values(['보유수량', '평가금액'], ascending=False).iloc[0]
+            return positive_holding.sort_values(['보유수량', '평가금액'], ascending=False).iloc[0]
         return positive_price.iloc[0]
     return candidates.iloc[0]
 
@@ -422,7 +422,7 @@ def build_category_rebalance_plan(category_df, category_name):
     rebalance_df = get_rebalance_base_df(category_df)
     category_total = float(rebalance_df['평가금액'].sum())
     if category_total <= 0 or not targets:
-        return [], [], {}
+            return [], [], {}
 
     account_balances = rebalance_df.groupby('계좌명')['평가금액'].sum().to_dict()
     irp_accounts = [acc for acc in account_balances if 'IRP' in str(acc).upper()]
