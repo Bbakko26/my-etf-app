@@ -53,6 +53,69 @@ CODE_MAP = {
 }
 
 
+DONUT_OUTER_OPACITY = 0.5  # 바깥(Target) 도넛 투명도: 0.0~1.0
+DONUT_OVERALL_HEIGHT = 420  # 전체/카테고리 도넛 차트 높이
+DONUT_FX_HEIGHT = 320  # 환율 도넛 차트 높이
+
+
+def get_target_order_map(targets_dict):
+    if not targets_dict:
+        return {}
+    return {asset: idx for idx, (asset, _) in enumerate(sorted(targets_dict.items(), key=lambda x: (-x[1], display_asset_group(x[0]))))}
+
+
+def add_sort_columns(df, asset_col='자산군', amount_col='평가금액', targets_dict=None):
+    out = df.copy()
+    order_map = get_target_order_map(targets_dict or {})
+    out['_asset_order'] = out[asset_col].map(order_map).fillna(999).astype(int)
+    if amount_col in out.columns:
+        out['_amount_sort'] = pd.to_numeric(out[amount_col], errors='coerce').fillna(0)
+    else:
+        out['_amount_sort'] = 0
+    return out
+
+
+def make_dual_donut(current_df, current_value_col, current_name_col, target_map, title, height=DONUT_OVERALL_HEIGHT):
+    names = list(dict.fromkeys(list(current_df[current_name_col].dropna()) + [display_asset_group(k) for k in target_map.keys()]))
+    current_map = current_df.groupby(current_name_col)[current_value_col].sum().to_dict()
+    target_display_map = {display_asset_group(k): v for k, v in target_map.items()}
+    current_vals = [current_map.get(name, 0) for name in names]
+    target_vals = [target_display_map.get(name, 0) for name in names]
+
+    fig = go.Figure()
+    fig.add_trace(go.Pie(
+        labels=names,
+        values=current_vals,
+        hole=0.48,
+        sort=False,
+        direction='clockwise',
+        textinfo='label+percent',
+        domain={'x': [0.12, 0.88], 'y': [0.12, 0.88]},
+        marker=dict(line=dict(color='white', width=1)),
+        name='현재'
+    ))
+    fig.add_trace(go.Pie(
+        labels=names,
+        values=target_vals,
+        hole=0.72,
+        sort=False,
+        direction='clockwise',
+        textinfo='none',
+        opacity=DONUT_OUTER_OPACITY,
+        domain={'x': [0.0, 1.0], 'y': [0.0, 1.0]},
+        marker=dict(line=dict(color='white', width=1)),
+        hovertemplate='<b>%{label}</b><br>목표: %{value:.1f}%<extra></extra>',
+        name='목표'
+    ))
+    fig.update_layout(
+        title=title,
+        height=height,
+        margin=dict(l=10, r=10, t=50, b=10),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+    )
+    return fig
+
+
 # -----------------------------
 # 데이터 로드 / 전처리
 # -----------------------------
@@ -459,10 +522,12 @@ try:
         sum_df['현재가'] = sum_df['종목코드'].map(price_map).fillna(0)
         sum_df['수익률'] = sum_df.apply(lambda x: calc_return(x['평가금액'], x['매수금액']), axis=1)
 
+        sum_df = add_sort_columns(sum_df, asset_col='자산군', amount_col='평가금액', targets_dict=total_target)
+        sum_df = sum_df.sort_values(['_asset_order', '평가금액', '약식종목명'], ascending=[True, False, True])
         st.dataframe(
             get_styled_df(
-                sum_df.sort_values('평가금액', ascending=False),
-                ['약식종목명', '자산군_표시', '보유수량', '매수평단', '현재가', '평가금액', '수익률'],
+                sum_df,
+                ['자산군_표시', '약식종목명', '보유수량', '매수평단', '현재가', '평가금액', '수익률'],
             ),
             use_container_width=True,
             hide_index=True,
@@ -525,10 +590,22 @@ try:
         grp_df['목표'] = grp_df['자산군'].map(total_target).fillna(0)
         grp_df['차이'] = grp_df['비중'] - grp_df['목표']
 
-        c1, c2 = st.columns(2)
-        c1.plotly_chart(px.pie(grp_df, values='비중', names='자산군_표시', title="현재(As-Is)", hole=0.5).update_layout(height=300), use_container_width=True, key="p2_is")
-        c2.plotly_chart(px.pie(grp_df, values='목표', names='자산군_표시', title="목표(Target)", hole=0.5).update_layout(height=300), use_container_width=True, key="p2_to")
-        st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군_표시', '평가금액', '비중', '목표', '차이']), use_container_width=True, hide_index=True)
+        st.plotly_chart(
+            make_dual_donut(
+                grp_df,
+                current_value_col='비중',
+                current_name_col='자산군_표시',
+                target_map={k: v for k, v in total_target.items()},
+                title="현재 비중 vs 목표 비중",
+                height=DONUT_OVERALL_HEIGHT,  # ← 전체 차트 크기 조절
+            ),
+            use_container_width=True,
+            key="p2_dual",
+        )
+
+        grp_df = add_sort_columns(grp_df, asset_col='자산군', amount_col='평가금액', targets_dict=total_target)
+        grp_df = grp_df.sort_values(['_asset_order', '평가금액', '자산군_표시'], ascending=[True, False, True])
+        st.dataframe(get_styled_df(grp_df, ['자산군_표시', '평가금액', '비중', '목표', '차이']), use_container_width=True, hide_index=True)
 
     # 3. 카테고리 분석
     with tabs[2]:
@@ -551,15 +628,28 @@ try:
                     rec_code = CODE_MAP[row['자산군']][recom_type]
                     st.info(f"💡 **{display_asset_group(row['자산군'])} 부족**: 현재 환율({current_fx:,.0f}원) 기준, **환{recom_type}형 ({rec_code})** 추가 매수를 권장합니다.")
 
-            c1, c2 = st.columns(2)
-            c1.plotly_chart(px.pie(sub_grp, values='비중', names='자산군_표시', title="현재", hole=0.5).update_layout(height=280), use_container_width=True, key=f"cat_is_{cat_name}")
-            c2.plotly_chart(px.pie(sub_grp, values='목표', names='자산군_표시', title="목표", hole=0.5).update_layout(height=280), use_container_width=True, key=f"cat_to_{cat_name}")
+            st.plotly_chart(
+                make_dual_donut(
+                    sub_grp,
+                    current_value_col='비중',
+                    current_name_col='자산군_표시',
+                    target_map={k: v * 100 for k, v in CATEGORY_TARGETS.get(cat_name, {}).items()},
+                    title=f"{cat_name} 현재 비중 vs 목표 비중",
+                    height=DONUT_OVERALL_HEIGHT,  # ← 카테고리 차트 크기 조절
+                ),
+                use_container_width=True,
+                key=f"cat_dual_{cat_name}",
+            )
             detail_cat_df = sub_df.assign(
                 비중=(sub_df['평가금액'] / cat_eval) * 100 if cat_eval > 0 else 0,
                 자산군_표시=sub_df['자산군'].apply(display_asset_group),
             )
+            account_order = detail_cat_df.groupby('계좌명')['평가금액'].sum().sort_values(ascending=False)
+            detail_cat_df['_account_order'] = detail_cat_df['계좌명'].map({name: idx for idx, name in enumerate(account_order.index)})
+            detail_cat_df = add_sort_columns(detail_cat_df, asset_col='자산군', amount_col='평가금액', targets_dict=CATEGORY_TARGETS.get(cat_name, {}))
+            detail_cat_df = detail_cat_df.sort_values(['_account_order', '_asset_order', '평가금액', '약식종목명'], ascending=[True, True, False, True])
             st.dataframe(
-                get_styled_df(detail_cat_df.sort_values('비중', ascending=False), ['계좌명', '약식종목명', '자산군_표시', '평가금액', '비중', '수익률']),
+                get_styled_df(detail_cat_df, ['계좌명', '자산군_표시', '약식종목명', '평가금액', '비중', '수익률']),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -573,8 +663,11 @@ try:
             acc_total = a_df['평가금액'].sum()
             a_df['비중'] = (a_df['평가금액'] / acc_total) * 100 if acc_total > 0 else 0
             a_df['자산군_표시'] = a_df['자산군'].apply(display_asset_group)
+            acc_category = a_df['계좌카테고리'].mode().iloc[0] if not a_df['계좌카테고리'].mode().empty else None
+            a_df = add_sort_columns(a_df, asset_col='자산군', amount_col='평가금액', targets_dict=CATEGORY_TARGETS.get(acc_category, {}))
+            a_df = a_df.sort_values(['_asset_order', '평가금액', '약식종목명'], ascending=[True, False, True])
             st.dataframe(
-                get_styled_df(a_df.sort_values('비중', ascending=False), ['약식종목명', '자산군_표시', '보유수량', '현재가', '평가금액', '비중', '수익률']),
+                get_styled_df(a_df, ['자산군_표시', '약식종목명', '보유수량', '현재가', '평가금액', '비중', '수익률']),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -587,7 +680,7 @@ try:
         fx_config = {
             "세액공제 O": ["S&P500", "나스닥100"],
             "세액공제 X": ["S&P500", "나스닥100"],
-            "ISA": ["다우존스", "나스닥100"],
+            "ISA": ["다우존스", "S&P500"],
         }
 
         for cat_name, targets in fx_config.items():
@@ -599,35 +692,20 @@ try:
                 st.write(f"#### 📊 {display_asset_group(target_asset)} (As-Is vs To-Be)")
                 fx_sub['구분'] = fx_sub['약식종목명'].astype(str).apply(lambda x: '환헤지' if '(H)' in x else '환노출')
                 asis_grp = fx_sub.groupby('구분')['평가금액'].sum().reset_index()
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.plotly_chart(
-                        px.pie(
-                            asis_grp,
-                            values='평가금액',
-                            names='구분',
-                            title='현재',
-                            hole=0.5,
-                            color='구분',
-                            color_discrete_map={'환노출': '#EF553B', '환헤지': '#636EFA'},
-                        ).update_layout(height=230, margin=dict(t=30, b=10)),
-                        use_container_width=True,
-                        key=f"fx_asis_{cat_name}_{target_asset}",
-                    )
-                with c2:
-                    st.plotly_chart(
-                        px.pie(
-                            pd.DataFrame([{'구분': '환노출', '값': t_fx['노출']}, {'구분': '환헤지', '값': t_fx['헤지']}]),
-                            values='값',
-                            names='구분',
-                            title='목표',
-                            hole=0.5,
-                            color='구분',
-                            color_discrete_map={'환노출': '#EF553B', '환헤지': '#636EFA'},
-                        ).update_layout(height=230, margin=dict(t=30, b=10)),
-                        use_container_width=True,
-                        key=f"fx_tobe_{cat_name}_{target_asset}",
-                    )
+                fx_total = asis_grp['평가금액'].sum()
+                asis_grp['비중'] = (asis_grp['평가금액'] / fx_total) * 100 if fx_total > 0 else 0
+                st.plotly_chart(
+                    make_dual_donut(
+                        asis_grp,
+                        current_value_col='비중',
+                        current_name_col='구분',
+                        target_map={'환노출': t_fx['노출'], '환헤지': t_fx['헤지']},
+                        title=f"{cat_name} - {display_asset_group(target_asset)} 환노출/헤지",
+                        height=DONUT_FX_HEIGHT,  # ← 환율 차트 크기 조절
+                    ),
+                    use_container_width=True,
+                    key=f"fx_dual_{cat_name}_{target_asset}",
+                )
             st.markdown("---")
 
     # 6. 리밸런싱
@@ -702,3 +780,4 @@ try:
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
+
