@@ -8,8 +8,65 @@ st.set_page_config(page_title="Family Portfolio", layout="wide")
 
 
 # -----------------------------
+# 설정값
+# -----------------------------
+DISPLAY_TO_CANONICAL = {
+    '현금성 (KOFR)': '금리',
+    '미국 국채': '미국채',
+    '현금': '금리',
+}
+CANONICAL_TO_DISPLAY = {
+    '금리': '현금성 (KOFR)',
+    '미국채': '미국 국채',
+}
+
+CATEGORY_TARGETS = {
+    '세액공제 O': {
+        'S&P500': 0.45,
+        '나스닥100': 0.25,
+        '금': 0.15,
+        '미국채': 0.10,
+        '금리': 0.05,
+    },
+    '세액공제 X': {
+        'S&P500': 0.45,
+        '나스닥100': 0.25,
+        '금': 0.15,
+        '미국채': 0.10,
+        '금리': 0.05,
+    },
+    'ISA': {
+        '다우존스': 0.50,
+        'S&P500': 0.20,
+        '금리': 0.30,
+    },
+}
+
+IRP_SAFE_ASSETS = {'금', '미국채', '금리'}
+CODE_MAP = {
+    'S&P500': {'노출': '360750', '헤지': '448290'},
+    '나스닥100': {'노출': '133690', '헤지': '448300'},
+    '다우존스': {'노출': '458730', '헤지': '452360'},
+    '금': {'기본': '411060'},
+    '미국채': {'기본': '305080'},
+    '금리': {'기본': '423160'},
+}
+
+
+# -----------------------------
 # 데이터 로드 / 전처리
 # -----------------------------
+def normalize_asset_group(value):
+    raw = '' if pd.isna(value) else str(value).strip()
+    if raw in DISPLAY_TO_CANONICAL:
+        return DISPLAY_TO_CANONICAL[raw]
+    return raw
+
+
+def display_asset_group(value):
+    return CANONICAL_TO_DISPLAY.get(value, value)
+
+
 def load_data():
     target_file = 'my_assets.csv'
     try:
@@ -35,6 +92,7 @@ def load_data():
     df['보유수량'] = pd.to_numeric(df['보유수량'], errors='coerce').fillna(0)
     df['매수평단'] = pd.to_numeric(df['매수평단'], errors='coerce').fillna(0)
     df['자산군'] = df['자산군'].fillna(df['약식종목명'])
+    df['자산군'] = df['자산군'].apply(normalize_asset_group)
     return df
 
 
@@ -70,8 +128,10 @@ FORMAT_RULES = {
     '평단': lambda x: safe_format(x),
     '매수평단': lambda x: safe_format(x),
     '목표금액': '{:,.0f}',
+    '현재금액': '{:,.0f}',
     '예상주문': '{:,.0f}',
     '조정수량': '{:+,.0f}',
+    '부족 안전자산': '{:,.1f}%',
 }
 
 
@@ -91,6 +151,8 @@ def get_styled_df(target_df, cols_to_show):
         '보유수량': '수량',
         '매수평단': '평단',
         '평가금액': '평가액',
+        '자산군_표시': '자산군',
+        '목표_표시': '목표 자산군',
     }
     df_view = df_view.rename(columns=rename_map)
 
@@ -132,48 +194,217 @@ def calc_return(eval_amt, buy_amt):
     return 0.0
 
 
+def build_overall_target_mix(asset_df):
+    total_val = asset_df['평가금액'].sum()
+    if total_val <= 0:
+        return {}
+
+    overall_amt = {}
+    for cat_name, targets in CATEGORY_TARGETS.items():
+        cat_total = asset_df.loc[asset_df['계좌카테고리'] == cat_name, '평가금액'].sum()
+        for asset, weight in targets.items():
+            overall_amt[asset] = overall_amt.get(asset, 0) + cat_total * weight
+
+    return {asset: (amt / total_val) * 100 for asset, amt in overall_amt.items()}
+
+
 # -----------------------------
 # 리밸런싱 엔진
 # -----------------------------
-def run_rebalance(df, targets, safes):
-    acc_balances = df.groupby('계좌명')['평가금액'].sum().to_dict()
-    total_val = sum(acc_balances.values())
+def allocate_amounts_by_capacity(accounts, amount):
+    """accounts: [{'name':..., 'capacity':...}]"""
+    remaining = max(float(amount), 0.0)
+    allocation = {acc['name']: 0.0 for acc in accounts}
+    capacities = {acc['name']: max(float(acc.get('capacity', 0)), 0.0) for acc in accounts}
 
-    overall_targets = {t: total_val * w for t, w in targets.items()}
-    allocation = {acc: {t: 0 for t in targets} for acc in acc_balances}
-    rem_targets = overall_targets.copy()
-
-    irp_accs = [a for a in acc_balances if 'IRP' in str(a)]
-    for acc in irp_accs:
-        req_safe = acc_balances[acc] * 0.3
-        allocated = 0
-        for t in sorted(safes, key=lambda x: targets.get(x, 0), reverse=True):
-            if allocated >= req_safe:
-                break
-            fill = min(rem_targets.get(t, 0), req_safe - allocated)
-            allocation[acc][t] = fill
-            allocated += fill
-            rem_targets[t] -= fill
-
-    for acc, bal in acc_balances.items():
-        avail = bal - sum(allocation[acc].values())
-        rem_total = sum(max(v, 0) for v in rem_targets.values())
-        if rem_total <= 0:
-            continue
-
-        for t in targets:
-            if rem_targets[t] <= 0:
+    while remaining > 1 and sum(capacities.values()) > 0:
+        total_cap = sum(capacities.values())
+        progress = 0.0
+        for name, cap in list(capacities.items()):
+            if cap <= 0:
                 continue
-            share = rem_targets[t] / rem_total
-            add = min(rem_targets[t], avail * share)
-            if 'IRP' in str(acc) and t not in safes:
-                current_risky = sum(v for k, v in allocation[acc].items() if k not in safes)
-                limit = (bal * 0.7) - current_risky
-                add = min(add, max(0, limit))
-            allocation[acc][t] += add
-            rem_targets[t] -= add
+            share = remaining * (cap / total_cap)
+            add = min(cap, share)
+            if add > 0:
+                allocation[name] += add
+                capacities[name] -= add
+                progress += add
+        remaining -= progress
+        if progress <= 1e-9:
+            break
 
-    return allocation
+    if remaining > 1 and sum(capacities.values()) > 0:
+        for name, cap in sorted(capacities.items(), key=lambda x: x[1], reverse=True):
+            if remaining <= 1:
+                break
+            add = min(cap, remaining)
+            allocation[name] += add
+            capacities[name] -= add
+            remaining -= add
+
+    return allocation, remaining
+
+
+def choose_order_row(acc_df, target_asset):
+    candidates = acc_df[acc_df['자산군'] == target_asset].copy()
+    if candidates.empty:
+        return None
+
+    if target_asset in {'S&P500', '나스닥100', '다우존스'}:
+        current_fx = get_usdkrw()
+        prefer_hedged = current_fx > 1380
+        if prefer_hedged:
+            hedged = candidates[candidates['약식종목명'].astype(str).str.contains(r'\(H\)', regex=True, na=False)]
+            if not hedged.empty:
+                candidates = hedged
+        else:
+            unhedged = candidates[~candidates['약식종목명'].astype(str).str.contains(r'\(H\)', regex=True, na=False)]
+            if not unhedged.empty:
+                candidates = unhedged
+
+    positive_price = candidates[candidates['현재가'] > 0]
+    if not positive_price.empty:
+        positive_holding = positive_price[positive_price['보유수량'] > 0]
+        if not positive_holding.empty:
+            return positive_holding.sort_values(['보유수량', '평가금액'], ascending=False).iloc[0]
+        return positive_price.iloc[0]
+    return candidates.iloc[0]
+
+
+def build_category_rebalance_plan(category_df, category_name):
+    targets = CATEGORY_TARGETS.get(category_name, {})
+    category_total = float(category_df['평가금액'].sum())
+    if category_total <= 0 or not targets:
+        return [], [], {}
+
+    account_balances = category_df.groupby('계좌명')['평가금액'].sum().to_dict()
+    irp_accounts = [acc for acc in account_balances if 'IRP' in str(acc).upper()]
+    non_irp_accounts = [acc for acc in account_balances if acc not in irp_accounts]
+
+    target_amounts = {asset: category_total * w for asset, w in targets.items()}
+    current_amounts = category_df.groupby('자산군')['평가금액'].sum().to_dict()
+    allocation = {acc: {asset: 0.0 for asset in targets} for acc in account_balances}
+    warnings = []
+
+    safe_assets = [asset for asset in targets if asset in IRP_SAFE_ASSETS]
+    risky_assets = [asset for asset in targets if asset not in IRP_SAFE_ASSETS]
+
+    # 1) 안전자산은 가능한 한 IRP에 몰아서 배치
+    if safe_assets:
+        safe_total = sum(target_amounts[a] for a in safe_assets)
+        irp_accounts_with_capacity = [{'name': acc, 'capacity': account_balances[acc]} for acc in irp_accounts]
+        safe_by_account, safe_left = allocate_amounts_by_capacity(irp_accounts_with_capacity, safe_total)
+
+        if safe_left > 1:
+            warnings.append(f"{category_name}: IRP 잔액이 부족해 안전자산 {safe_left:,.0f}원이 비IRP 계좌로 넘어갑니다.")
+            overflow_accounts = [{'name': acc, 'capacity': account_balances[acc]} for acc in non_irp_accounts]
+            extra_alloc, extra_left = allocate_amounts_by_capacity(overflow_accounts, safe_left)
+            for acc, amt in extra_alloc.items():
+                safe_by_account[acc] = safe_by_account.get(acc, 0.0) + amt
+            if extra_left > 1:
+                warnings.append(f"{category_name}: 전체 배분 용량이 부족해 {extra_left:,.0f}원이 미배정 상태입니다.")
+
+        safe_target_total = safe_total if safe_total > 0 else 1.0
+        for asset in safe_assets:
+            ratio = target_amounts[asset] / safe_target_total
+            for acc, acc_safe_amt in safe_by_account.items():
+                if acc not in allocation:
+                    allocation[acc] = {a: 0.0 for a in targets}
+                allocation[acc][asset] = acc_safe_amt * ratio
+
+        # IRP 30% 룰 체크
+        for acc in irp_accounts:
+            safe_alloc = sum(allocation[acc].get(asset, 0.0) for asset in safe_assets)
+            req_safe = account_balances[acc] * 0.30
+            if safe_alloc + 1 >= req_safe:
+                continue
+            shortage = req_safe - safe_alloc
+            donor_assets = sorted(risky_assets, key=lambda a: allocation[acc].get(a, 0.0), reverse=True)
+            for donor in donor_assets:
+                if shortage <= 1:
+                    break
+                donor_amt = allocation[acc].get(donor, 0.0)
+                take = min(donor_amt, shortage)
+                allocation[acc][donor] -= take
+                # 부족분은 금리로 우선 전환
+                if '금리' in targets:
+                    allocation[acc]['금리'] = allocation[acc].get('금리', 0.0) + take
+                elif safe_assets:
+                    allocation[acc][safe_assets[0]] = allocation[acc].get(safe_assets[0], 0.0) + take
+                shortage -= take
+            if shortage > 1:
+                warnings.append(f"{category_name}: {acc}의 IRP 안전자산 30% 룰을 목표 비중만으로는 완전히 충족하기 어렵습니다. 부족분 {shortage:,.0f}원")
+
+    # 2) 위험자산은 남은 계좌 용량 기준으로 배치
+    remaining_capacity = {}
+    for acc, bal in account_balances.items():
+        used = sum(allocation[acc].values())
+        remaining_capacity[acc] = max(bal - used, 0.0)
+
+    for asset in risky_assets:
+        amount = target_amounts[asset]
+        alloc, leftover = allocate_amounts_by_capacity(
+            [{'name': acc, 'capacity': remaining_capacity[acc]} for acc in account_balances],
+            amount,
+        )
+        for acc, amt in alloc.items():
+            allocation[acc][asset] += amt
+            remaining_capacity[acc] = max(remaining_capacity[acc] - amt, 0.0)
+        if leftover > 1:
+            warnings.append(f"{category_name}: {display_asset_group(asset)} {leftover:,.0f}원이 계좌 용량 부족으로 미배정되었습니다.")
+
+    # 3) 결과 테이블 구성
+    plan_rows = []
+    for acc, per_asset in allocation.items():
+        acc_df = category_df[category_df['계좌명'] == acc].copy()
+        for asset, target_amt in per_asset.items():
+            if target_amt <= 0:
+                continue
+            curr_val = float(acc_df.loc[acc_df['자산군'] == asset, '평가금액'].sum())
+            row = choose_order_row(acc_df, asset)
+            if row is None:
+                continue
+            curr_price = float(row['현재가']) if pd.notna(row['현재가']) else 0.0
+            diff_amt = target_amt - curr_val
+            diff_qty = 0
+            if curr_price > 0:
+                diff_qty = int(diff_amt / curr_price)
+            plan_rows.append({
+                '계좌카테고리': category_name,
+                '계좌명': acc,
+                '자산군': asset,
+                '자산군_표시': display_asset_group(asset),
+                '목표_표시': display_asset_group(asset),
+                '약식종목명': row['약식종목명'],
+                '종목코드': row['종목코드'],
+                '현재가': curr_price,
+                '현재금액': curr_val,
+                '목표금액': target_amt,
+                '차액': diff_amt,
+                '조정수량': diff_qty,
+                '예상주문': diff_qty * curr_price,
+            })
+
+    rule_rows = []
+    for acc in irp_accounts:
+        safe_now = category_df[(category_df['계좌명'] == acc) & (category_df['자산군'].isin(IRP_SAFE_ASSETS))]['평가금액'].sum()
+        safe_target = sum(allocation[acc].get(asset, 0.0) for asset in safe_assets)
+        acc_total = account_balances[acc]
+        rule_rows.append({
+            '계좌명': acc,
+            '현재 안전자산 비중': (safe_now / acc_total * 100) if acc_total > 0 else 0,
+            '목표 안전자산 비중': (safe_target / acc_total * 100) if acc_total > 0 else 0,
+            '부족 안전자산': max(30 - ((safe_target / acc_total * 100) if acc_total > 0 else 0), 0),
+        })
+
+    meta = {
+        'category_total': category_total,
+        'target_amounts': target_amounts,
+        'current_amounts': current_amounts,
+        'allocation': allocation,
+        'account_balances': account_balances,
+    }
+    return plan_rows, rule_rows, {'warnings': warnings, 'meta': meta}
 
 
 # -----------------------------
@@ -183,18 +414,6 @@ try:
     df_raw = load_data()
     seed_df = df_raw[df_raw['종목코드'].astype(str).str.upper() == 'SEED'].copy()
     asset_df = df_raw[df_raw['종목코드'].astype(str).str.upper() != 'SEED'].copy()
-
-    total_target = {"나스닥100": 35.0, "S&P500": 35.0, "국내 ETF": 10.0, "금": 5.0, "현금": 15.0}
-    cat_targets = {
-        "세액공제 O": {"나스닥100": 40.0, "S&P500": 40.0, "국내 ETF": 10.0, "금": 5.0, "현금": 5.0},
-        "세액공제 X": {"나스닥100": 50.0, "S&P500": 50.0},
-        "ISA": {"다우존스": 50.0, "S&P500": 30.0, "현금": 20.0},
-    }
-    code_map = {
-        "S&P500": {"노출": "360750", "헤지": "448290"},
-        "나스닥100": {"노출": "133690", "헤지": "448300"},
-        "다우존스": {"노출": "458730", "헤지": "452250"},
-    }
 
     with st.spinner('실시간 데이터 업데이트 중...'):
         unique_codes = tuple(asset_df['종목코드'].dropna().astype(str).unique())
@@ -215,6 +434,8 @@ try:
         total_seed = asset_df['매수금액'].sum()
     total_profit = total_eval - total_seed
 
+    total_target = build_overall_target_mix(asset_df)
+
     st.title("💰 Family Portfolio")
     c1, c2, c3 = st.columns(3)
     c1.metric("총 투입원금", f"{total_seed:,.0f}원")
@@ -230,6 +451,7 @@ try:
             .agg({'보유수량': 'sum', '매수금액': 'sum', '평가금액': 'sum'})
             .reset_index()
         )
+        sum_df['자산군_표시'] = sum_df['자산군'].apply(display_asset_group)
         sum_df['매수평단'] = sum_df.apply(
             lambda x: x['매수금액'] / x['보유수량'] if x['보유수량'] > 0 else 0,
             axis=1,
@@ -240,7 +462,7 @@ try:
         st.dataframe(
             get_styled_df(
                 sum_df.sort_values('평가금액', ascending=False),
-                ['약식종목명', '자산군', '보유수량', '매수평단', '현재가', '평가금액', '수익률'],
+                ['약식종목명', '자산군_표시', '보유수량', '매수평단', '현재가', '평가금액', '수익률'],
             ),
             use_container_width=True,
             hide_index=True,
@@ -298,17 +520,15 @@ try:
     with tabs[1]:
         st.subheader("📊 전체 포트폴리오 상태")
         grp_df = asset_df.groupby('자산군', dropna=False).agg({'평가금액': 'sum'}).reset_index()
+        grp_df['자산군_표시'] = grp_df['자산군'].apply(display_asset_group)
         grp_df['비중'] = (grp_df['평가금액'] / total_eval) * 100 if total_eval > 0 else 0
         grp_df['목표'] = grp_df['자산군'].map(total_target).fillna(0)
         grp_df['차이'] = grp_df['비중'] - grp_df['목표']
 
-        if len(grp_df[abs(grp_df['차이']) >= 5]) >= 3:
-            st.error("🚨 **종합 리밸런싱 필요**: 목표 비중 이탈 자산군이 3개 이상입니다.")
-
         c1, c2 = st.columns(2)
-        c1.plotly_chart(px.pie(grp_df, values='비중', names='자산군', title="현재(As-Is)", hole=0.5).update_layout(height=300), use_container_width=True, key="p2_is")
-        c2.plotly_chart(px.pie(grp_df, values='목표', names='자산군', title="목표(Target)", hole=0.5).update_layout(height=300), use_container_width=True, key="p2_to")
-        st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군', '평가금액', '비중', '목표', '차이']), use_container_width=True, hide_index=True)
+        c1.plotly_chart(px.pie(grp_df, values='비중', names='자산군_표시', title="현재(As-Is)", hole=0.5).update_layout(height=300), use_container_width=True, key="p2_is")
+        c2.plotly_chart(px.pie(grp_df, values='목표', names='자산군_표시', title="목표(Target)", hole=0.5).update_layout(height=300), use_container_width=True, key="p2_to")
+        st.dataframe(get_styled_df(grp_df.sort_values('비중', ascending=False), ['자산군_표시', '평가금액', '비중', '목표', '차이']), use_container_width=True, hide_index=True)
 
     # 3. 카테고리 분석
     with tabs[2]:
@@ -320,22 +540,26 @@ try:
             st.subheader(f"🏦 {cat_name} 분석 및 매수 가이드")
             cat_eval = sub_df['평가금액'].sum()
             sub_grp = sub_df.groupby('자산군', dropna=False).agg({'평가금액': 'sum'}).reset_index()
+            sub_grp['자산군_표시'] = sub_grp['자산군'].apply(display_asset_group)
             sub_grp['비중'] = (sub_grp['평가금액'] / cat_eval) * 100 if cat_eval > 0 else 0
-            sub_grp['목표'] = sub_grp['자산군'].map(cat_targets.get(cat_name, {})).fillna(0)
+            sub_grp['목표'] = sub_grp['자산군'].map({k: v * 100 for k, v in CATEGORY_TARGETS.get(cat_name, {}).items()}).fillna(0)
             sub_grp['차이'] = sub_grp['비중'] - sub_grp['목표']
 
             recom_type = "헤지" if current_fx > 1380 else "노출"
             for _, row in sub_grp.iterrows():
-                if row['차이'] <= -3.0 and row['자산군'] in code_map:
-                    rec_code = code_map[row['자산군']][recom_type]
-                    st.info(f"💡 **{row['자산군']} 부족**: 현재 환율({current_fx:,.0f}원) 기준, **환{recom_type}형 ({rec_code})** 추가 매수를 권장합니다.")
+                if row['차이'] <= -3.0 and row['자산군'] in CODE_MAP and row['자산군'] in {'S&P500', '나스닥100', '다우존스'}:
+                    rec_code = CODE_MAP[row['자산군']][recom_type]
+                    st.info(f"💡 **{display_asset_group(row['자산군'])} 부족**: 현재 환율({current_fx:,.0f}원) 기준, **환{recom_type}형 ({rec_code})** 추가 매수를 권장합니다.")
 
             c1, c2 = st.columns(2)
-            c1.plotly_chart(px.pie(sub_grp, values='비중', names='자산군', title="현재", hole=0.5).update_layout(height=280), use_container_width=True, key=f"cat_is_{cat_name}")
-            c2.plotly_chart(px.pie(sub_grp, values='목표', names='자산군', title="목표", hole=0.5).update_layout(height=280), use_container_width=True, key=f"cat_to_{cat_name}")
-            detail_cat_df = sub_df.assign(비중=(sub_df['평가금액'] / cat_eval) * 100 if cat_eval > 0 else 0)
+            c1.plotly_chart(px.pie(sub_grp, values='비중', names='자산군_표시', title="현재", hole=0.5).update_layout(height=280), use_container_width=True, key=f"cat_is_{cat_name}")
+            c2.plotly_chart(px.pie(sub_grp, values='목표', names='자산군_표시', title="목표", hole=0.5).update_layout(height=280), use_container_width=True, key=f"cat_to_{cat_name}")
+            detail_cat_df = sub_df.assign(
+                비중=(sub_df['평가금액'] / cat_eval) * 100 if cat_eval > 0 else 0,
+                자산군_표시=sub_df['자산군'].apply(display_asset_group),
+            )
             st.dataframe(
-                get_styled_df(detail_cat_df.sort_values('비중', ascending=False), ['계좌명', '약식종목명', '평가금액', '비중', '수익률']),
+                get_styled_df(detail_cat_df.sort_values('비중', ascending=False), ['계좌명', '약식종목명', '자산군_표시', '평가금액', '비중', '수익률']),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -348,8 +572,9 @@ try:
             st.markdown(f"### 🏦 {acc}")
             acc_total = a_df['평가금액'].sum()
             a_df['비중'] = (a_df['평가금액'] / acc_total) * 100 if acc_total > 0 else 0
+            a_df['자산군_표시'] = a_df['자산군'].apply(display_asset_group)
             st.dataframe(
-                get_styled_df(a_df.sort_values('비중', ascending=False), ['약식종목명', '보유수량', '현재가', '평가금액', '비중', '수익률']),
+                get_styled_df(a_df.sort_values('비중', ascending=False), ['약식종목명', '자산군_표시', '보유수량', '현재가', '평가금액', '비중', '수익률']),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -362,7 +587,7 @@ try:
         fx_config = {
             "세액공제 O": ["S&P500", "나스닥100"],
             "세액공제 X": ["S&P500", "나스닥100"],
-            "ISA": ["다우존스", "S&P500"],
+            "ISA": ["다우존스", "나스닥100"],
         }
 
         for cat_name, targets in fx_config.items():
@@ -371,7 +596,7 @@ try:
                 fx_sub = asset_df[(asset_df['계좌카테고리'] == cat_name) & (asset_df['자산군'] == target_asset)].copy()
                 if fx_sub.empty:
                     continue
-                st.write(f"#### 📊 {target_asset} (As-Is vs To-Be)")
+                st.write(f"#### 📊 {display_asset_group(target_asset)} (As-Is vs To-Be)")
                 fx_sub['구분'] = fx_sub['약식종목명'].astype(str).apply(lambda x: '환헤지' if '(H)' in x else '환노출')
                 asis_grp = fx_sub.groupby('구분')['평가금액'].sum().reset_index()
                 c1, c2 = st.columns(2)
@@ -407,64 +632,73 @@ try:
 
     # 6. 리밸런싱
     with tabs[5]:
-        st.subheader("⚖️ 통합 목표 기반 리밸런싱")
-        target_weights = {
-            'S&P500': 0.45,
-            '나스닥100': 0.25,
-            '금': 0.15,
-            '미국국채': 0.10,
-            'KOFR': 0.05,
-        }
-        safe_assets = ['금', '미국국채', 'KOFR']
+        st.subheader("⚖️ 카테고리별 리밸런싱")
+        st.info("세액공제 O / X는 계좌 카테고리 총액 기준으로 목표 비중을 계산하고, 계좌별 금액 비중을 반영해 배분합니다. IRP가 있는 카테고리는 금·미국채·KOFR를 우선 IRP에 배치해 IRP 30% 안전자산 룰을 최대한 맞춥니다.")
 
-        col_t1, col_t2 = st.columns([1, 2])
-        col_t1.write("**🎯 통합 목표 비중**")
-        col_t1.json(target_weights)
-        col_t2.info(f"**🛡️ IRP 안전자산 가이드**\n대상: {', '.join(safe_assets)}\n(계좌 잔액의 30% 우선 할당)")
+        target_view = []
+        for cat_name, targets in CATEGORY_TARGETS.items():
+            for asset, weight in targets.items():
+                target_view.append({'카테고리': cat_name, '자산군': display_asset_group(asset), '목표 비중': weight * 100})
+        st.dataframe(pd.DataFrame(target_view), use_container_width=True, hide_index=True)
 
         if st.button("🔄 리밸런싱 수량 계산"):
-            alloc_result = run_rebalance(asset_df, target_weights, safe_assets)
-            rebal_rows = []
+            plan_frames = []
+            rule_frames = []
+            all_warnings = []
 
-            for acc, assets in alloc_result.items():
-                for target_asset, target_amt in assets.items():
-                    row = asset_df[(asset_df['계좌명'] == acc) & (asset_df['자산군'] == target_asset)]
-                    curr_val = row['평가금액'].sum()
+            for cat_name in ['세액공제 O', '세액공제 X', 'ISA']:
+                cat_df = asset_df[asset_df['계좌카테고리'] == cat_name].copy()
+                if cat_df.empty:
+                    continue
+                plan_rows, rule_rows, extra = build_category_rebalance_plan(cat_df, cat_name)
+                if plan_rows:
+                    plan_frames.append(pd.DataFrame(plan_rows))
+                if rule_rows:
+                    rule_frames.append(pd.DataFrame(rule_rows))
+                all_warnings.extend(extra.get('warnings', []))
 
-                    curr_price = 0
-                    if not row.empty:
-                        non_cash_prices = row.loc[row['현재가'] > 0, '현재가']
-                        if not non_cash_prices.empty:
-                            curr_price = float(non_cash_prices.iloc[0])
+            if all_warnings:
+                for msg in all_warnings:
+                    st.warning(msg)
 
-                    if curr_price <= 0:
-                        continue
+            if plan_frames:
+                result_df = pd.concat(plan_frames, ignore_index=True)
+                result_df = result_df[result_df['현재가'] > 0].copy()
+                result_df = result_df.sort_values(['계좌카테고리', '계좌명', '자산군', '예상주문'], ascending=[True, True, True, False])
 
-                    diff_qty = int((target_amt - curr_val) // curr_price)
-                    if diff_qty != 0:
-                        rebal_rows.append(
-                            {
-                                '계좌': acc,
-                                '종목': target_asset,
-                                '현재가': curr_price,
-                                '목표금액': target_amt,
-                                '조정수량': diff_qty,
-                                '예상주문': diff_qty * curr_price,
-                            }
-                        )
+                for cat_name in result_df['계좌카테고리'].unique():
+                    st.markdown(f"### {cat_name}")
+                    sub = result_df[result_df['계좌카테고리'] == cat_name].copy()
+                    st.dataframe(
+                        sub.style.applymap(
+                            lambda x: 'color: #d32f2f' if x > 0 else 'color: #1976d2',
+                            subset=['조정수량'],
+                        ).format({
+                            '현재가': '{:,.0f}',
+                            '현재금액': '{:,.0f}',
+                            '목표금액': '{:,.0f}',
+                            '차액': '{:+,.0f}',
+                            '예상주문': '{:+,.0f}',
+                            '조정수량': '{:+,.0f}',
+                        }),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            else:
+                st.success("현재 비중이 목표와 거의 같거나, 리밸런싱 가능한 매핑 종목이 없습니다.")
 
-            if rebal_rows:
-                result_df = pd.DataFrame(rebal_rows)
+            if rule_frames:
+                st.markdown("### IRP 안전자산 30% 점검")
+                rule_df = pd.concat(rule_frames, ignore_index=True)
                 st.dataframe(
-                    result_df.style.applymap(
-                        lambda x: 'color: #d32f2f' if x > 0 else 'color: #1976d2',
-                        subset=['조정수량'],
-                    ).format({'목표금액': '{:,.0f}', '현재가': '{:,.0f}', '예상주문': '{:,.0f}', '조정수량': '{:+,.0f}'}),
+                    rule_df.style.format({
+                        '현재 안전자산 비중': '{:.1f}%',
+                        '목표 안전자산 비중': '{:.1f}%',
+                        '부족 안전자산': '{:.1f}%'
+                    }),
                     use_container_width=True,
                     hide_index=True,
                 )
-            else:
-                st.success("현재 비중이 완벽하거나, 리밸런싱 가능한 매핑 종목이 없습니다.")
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
