@@ -61,8 +61,8 @@ DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.92], "y": [0.08, 0.92]}  # 환율 목표
 
 # 환율관리 탭 도넛 색상
 FX_COLOR_MAP = {
-    "환노출": "#ff7f0e",  # 파란색 계열
-    "환헤지": "#1f77b4",  # 주황색 계열
+    "환노출": "#1f77b4",  # 파란색 계열
+    "환헤지": "#ff7f0e",  # 주황색 계열
 }
 
 DISPLAY_WEIGHT_THRESHOLD = 0.1
@@ -80,8 +80,10 @@ st.markdown(
     """
     <style>
     html, body, [class*="css"] { font-size: 12px !important; }
-    h1 { font-size: 1.2rem !important; }
+    h1 { font-size: 1.2rem !important; margin-bottom: 0.5rem !important; }
     .stDataFrame div { font-size: 11px !important; }
+    div[data-testid="stTabs"] { margin-top: 0.75rem !important; }
+    div[data-testid="stTabs"] button { padding-top: 0.6rem !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -197,7 +199,7 @@ def make_dual_donut(
     current_domain,
     target_domain,
     current_hole=0.48,
-    target_hole=0.75,
+    target_hole=0.72,
     current_color_map=None,
     target_color_map=None,
 ):
@@ -367,28 +369,71 @@ def build_daily_alerts(asset_df, drop_threshold=-2.5):
 
 
 def make_price_chart(hist_df, avg_price=None, title="최근 120일 차트"):
+    chart_df = hist_df.copy()
+    if chart_df is None or chart_df.empty:
+        return go.Figure()
+
+    for col in ["Open", "High", "Low", "Close"]:
+        if col not in chart_df.columns:
+            return go.Figure()
+
+    chart_df["MA20"] = chart_df["Close"].rolling(20).mean()
+    chart_df["MA60"] = chart_df["Close"].rolling(60).mean()
+
     fig = go.Figure()
+
+    # 한국 주식앱 느낌에 맞춰 상승=빨강, 하락=파랑
     fig.add_trace(
-        go.Scatter(
-            x=hist_df.index,
-            y=hist_df["Close"],
-            mode="lines",
-            name="종가",
+        go.Candlestick(
+            x=chart_df.index,
+            open=chart_df["Open"],
+            high=chart_df["High"],
+            low=chart_df["Low"],
+            close=chart_df["Close"],
+            increasing_line_color="#d32f2f",
+            increasing_fillcolor="#d32f2f",
+            decreasing_line_color="#1976d2",
+            decreasing_fillcolor="#1976d2",
+            name="일봉",
         )
     )
+
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["MA20"],
+            mode="lines",
+            name="20일선",
+            line=dict(color="#f4b400", width=1.8),
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["MA60"],
+            mode="lines",
+            name="60일선",
+            line=dict(color="#34a853", width=1.8),
+        )
+    )
+
     if avg_price is not None and float(avg_price) > 0:
         fig.add_hline(
             y=float(avg_price),
             line_dash="dash",
+            line_color="#6a1b9a",
             annotation_text=f"내 평단 {float(avg_price):,.0f}",
             annotation_position="top left",
         )
+
     fig.update_layout(
         title=title,
-        height=360,
+        height=420,
         margin=dict(l=20, r=20, t=50, b=20),
         xaxis_title="날짜",
         yaxis_title="가격",
+        xaxis_rangeslider_visible=False,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
@@ -462,6 +507,14 @@ def choose_fx_side(asset, current_fx):
     if asset in {"S&P500", "나스닥100", "다우존스"}:
         return "헤지" if current_fx > 1380 else "노출"
     return "기본"
+
+
+def get_fx_target_mix(current_fx):
+    if current_fx > 1400:
+        return FX_TARGETS_HIGH
+    if current_fx < 1330:
+        return FX_TARGETS_LOW
+    return FX_TARGETS_MID
 
 
 def choose_order_row(account_df, asset, current_fx):
@@ -629,6 +682,7 @@ try:
     total_target = build_overall_target_mix(asset_df)
 
     st.title("💰 Family Portfolio")
+    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     c1.metric("총 투입원금", f"{total_seed:,.0f}원")
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
@@ -646,7 +700,8 @@ try:
     with f2:
         display_weight_threshold = st.number_input("비중 표시 최소값(%)", min_value=0.0, value=float(DISPLAY_WEIGHT_THRESHOLD), step=0.1)
 
-    tabs = st.tabs(["📊 종목 상세", "🍩 전체", "🏦 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
+    st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+    tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
 
     # 1. 종목 상세
     with tabs[0]:
@@ -910,22 +965,21 @@ try:
 
             if all_plan_frames:
                 plan_df = pd.concat(all_plan_frames, ignore_index=True)
-                plan_df = plan_df.sort_values(["_category_order", "계좌명", "자산군_표시", "예상주문"], ascending=[True, True, True, False])
+                plan_df = plan_df.sort_values(["_category_order", "계좌명", "자산군_표시", "목표금액"], ascending=[True, True, True, False])
                 for cat_name in CATEGORY_ORDER:
                     sub = plan_df[plan_df["계좌카테고리"] == cat_name].copy()
                     if sub.empty:
                         continue
                     st.markdown(f"### {cat_name}")
+                    display_cols = ["계좌명", "자산군_표시", "약식종목명", "종목코드", "목표금액", "현재금액", "현재가", "조정수량", "권장환형태", "권장환비율"]
                     st.dataframe(
-                        sub.drop(columns=["_category_order"]).style.applymap(
-                            lambda x: "color: #d32f2f" if pd.notna(x) and x > 0 else "color: #1976d2",
+                        sub[display_cols].style.applymap(
+                            lambda x: "color: #d32f2f" if pd.notna(x) and isinstance(x, (int, float)) and x > 0 else "color: #1976d2",
                             subset=["조정수량"],
                         ).format({
-                            "현재가": "{:,.0f}",
-                            "현재금액": "{:,.0f}",
                             "목표금액": "{:,.0f}",
-                            "차액": "{:+,.0f}",
-                            "예상주문": "{:+,.0f}",
+                            "현재금액": "{:,.0f}",
+                            "현재가": "{:,.0f}",
                             "조정수량": "{:+,.0f}",
                         }),
                         use_container_width=True,
