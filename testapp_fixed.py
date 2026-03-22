@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 import FinanceDataReader as fdr
 import plotly.graph_objects as go
@@ -52,6 +52,11 @@ DONUT_OUTER_OPACITY = 0.50
 DONUT_OVERALL_HEIGHT = 460   # 전체/카테고리 도넛 높이
 DONUT_FX_HEIGHT = 340        # 환율 도넛 높이
 
+# 모바일 겹침 완화용 여백/범례 설정
+MOBILE_DONUT_TOP_MARGIN = 95
+MOBILE_DONUT_BOTTOM_MARGIN = 40
+MOBILE_LEGEND_Y = 1.10
+
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
 DONUT_CURRENT_DOMAIN = {"x": [0.20, 0.80], "y": [0.20, 0.80]}   # 현재 도넛
@@ -84,6 +89,7 @@ st.markdown(
     .stDataFrame div { font-size: 11px !important; }
     div[data-testid="stTabs"] { margin-top: 0.75rem !important; }
     div[data-testid="stTabs"] button { padding-top: 0.6rem !important; }
+    .js-plotly-plot .plotly .gtitle { transform: translateY(8px); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -176,6 +182,17 @@ def style_table(df, cols, show_all=False, min_weight=DISPLAY_WEIGHT_THRESHOLD):
     cols = [c for c in cols if c in filtered.columns]
     view = filtered[cols].copy().astype(object)
 
+    cash_mask = None
+    if "종목코드" in filtered.columns:
+        cash_mask = filtered["종목코드"].astype(str).str.upper().eq("CASH")
+    elif "자산군" in filtered.columns:
+        cash_mask = filtered["자산군"].astype(str).eq("현금")
+
+    if cash_mask is not None:
+        for col in ["보유수량", "매수평단", "현재가"]:
+            if col in view.columns:
+                view.loc[cash_mask, col] = "-"
+
     rename_map = {
         "계좌명": "계좌",
         "약식종목명": "종목",
@@ -257,10 +274,17 @@ def make_dual_donut(
         )
     )
     fig.update_layout(
-        title=title,
+        title=dict(text=title, y=0.96),
         height=height,
-        margin=dict(l=10, r=10, t=50, b=10),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        margin=dict(l=10, r=10, t=MOBILE_DONUT_TOP_MARGIN, b=MOBILE_DONUT_BOTTOM_MARGIN),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=MOBILE_LEGEND_Y,
+            xanchor="center",
+            x=0.5,
+            tracegroupgap=6,
+        ),
     )
     return fig
 
@@ -440,9 +464,9 @@ def make_price_chart(hist_df, avg_price=None, title="최근 120일 차트"):
         )
 
     fig.update_layout(
-        title=title,
+        title=dict(text=title, y=0.96),
         height=420,
-        margin=dict(l=20, r=20, t=50, b=20),
+        margin=dict(l=20, r=20, t=70, b=20),
         xaxis_title="날짜",
         yaxis_title="가격",
         xaxis_rangeslider_visible=False,
@@ -1040,3 +1064,4 @@ try:
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
+
