@@ -53,7 +53,7 @@ DONUT_OVERALL_HEIGHT = 600   # 전체/카테고리 도넛 높이
 DONUT_FX_HEIGHT = 500        # 환율 도넛 높이
 
 # 모바일 겹침 완화용 여백/범례 설정
-MOBILE_DONUT_TOP_MARGIN = 40
+MOBILE_DONUT_TOP_MARGIN = 120
 MOBILE_DONUT_BOTTOM_MARGIN = 95
 MOBILE_LEGEND_Y = -0.14
 
@@ -66,8 +66,8 @@ DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.92], "y": [0.08, 0.92]}  # 환율 목표
 
 # 환율관리 탭 도넛 색상
 FX_COLOR_MAP = {
-    "환노출": "#ff7f0e",  # 파란색 계열
-    "환헤지": "#1f77b4",  # 주황색 계열
+    "환노출": "#ff7f0e",  # 주황색 계열
+    "환헤지": "#1f77b4",  # 파랑색 계열
 }
 
 DISPLAY_WEIGHT_THRESHOLD = 0.1
