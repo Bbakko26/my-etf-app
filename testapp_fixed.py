@@ -1002,6 +1002,7 @@ try:
                 st.warning(msg)
 
             if all_plan_frames:
+                st.caption("권장환형태: 현재 환율 기준으로 각 해외주식형 자산에 대해 환노출/환헤지 중 어느 형태를 우선 매수·조정할지 보여줍니다.")
                 plan_df = pd.concat(all_plan_frames, ignore_index=True)
                 plan_df = plan_df.sort_values(["_category_order", "계좌명", "자산군_표시", "목표금액"], ascending=[True, True, True, False])
                 for cat_name in CATEGORY_ORDER:
@@ -1041,4 +1042,5 @@ try:
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
+
 
