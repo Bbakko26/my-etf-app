@@ -189,6 +189,20 @@ def style_table(df, cols, show_all=False, min_weight=DISPLAY_WEIGHT_THRESHOLD):
     return view.style.format(format_rules)
 
 
+def highlight_underweight_rows(df_view):
+    def _row_style(row):
+        if "비중" in row.index and "목표" in row.index:
+            try:
+                current_weight = float(row["비중"])
+                target_weight = float(row["목표"])
+                if current_weight < target_weight:
+                    return ["color: #d32f2f; font-weight: 600"] * len(row)
+            except Exception:
+                pass
+        return [""] * len(row)
+    return df_view.apply(_row_style, axis=1)
+
+
 def make_dual_donut(
     current_df,
     current_value_col,
@@ -847,20 +861,20 @@ try:
             detail = cat_df.copy()
             detail["자산군_표시"] = detail["자산군"].apply(display_asset_group)
             detail["비중"] = detail["평가금액"] / cat_total * 100.0 if cat_total > 0 else 0.0
+            detail["목표"] = detail["자산군"].map({k: v * 100 for k, v in CATEGORY_TARGETS[cat_name].items()}).fillna(0.0)
             acc_order = detail.groupby("계좌명")["평가금액"].sum().sort_values(ascending=False)
             detail["_account_order"] = detail["계좌명"].map({k: i for i, k in enumerate(acc_order.index)})
-            sort_targets = CATEGORY_TARGETS[cat_name].copy()
-            sort_targets["현금"] = 999
-            detail = add_sort_columns(detail, asset_col="자산군", amount_col="평가금액", targets_dict=sort_targets)
-            detail = detail.sort_values(["_account_order", "_asset_order", "평가금액", "약식종목명"], ascending=[True, True, False, True])
+            detail = detail.sort_values(["_account_order", "목표", "평가금액", "약식종목명"], ascending=[True, False, False, True])
+
+            styled_detail = style_table(
+                detail,
+                ["계좌명", "자산군_표시", "약식종목명", "평가금액", "비중", "목표", "수익률"],
+                show_all=show_all_rows,
+                min_weight=display_weight_threshold,
+            ).apply(highlight_underweight_rows, axis=1)
 
             st.dataframe(
-                style_table(
-                    detail,
-                    ["계좌명", "자산군_표시", "약식종목명", "평가금액", "비중", "수익률"],
-                    show_all=show_all_rows,
-                    min_weight=display_weight_threshold,
-                ),
+                styled_detail,
                 use_container_width=True,
                 hide_index=True,
             )
@@ -897,6 +911,29 @@ try:
     with tabs[4]:
         st.subheader(f"🌎 실시간 환율: {current_fx:,.2f}원")
         fx_target = FX_TARGETS_HIGH if current_fx > 1400 else (FX_TARGETS_LOW if current_fx < 1330 else FX_TARGETS_MID)
+
+        fx_logic_df = pd.DataFrame([
+            {"환율 범위": "1400 초과", "대응 방안": f"환노출 {FX_TARGETS_HIGH['환노출']:.0f}% / 환헤지 {FX_TARGETS_HIGH['환헤지']:.0f}%"},
+            {"환율 범위": "1330 이상 ~ 1400 이하", "대응 방안": f"환노출 {FX_TARGETS_MID['환노출']:.0f}% / 환헤지 {FX_TARGETS_MID['환헤지']:.0f}%"},
+            {"환율 범위": "1330 미만", "대응 방안": f"환노출 {FX_TARGETS_LOW['환노출']:.0f}% / 환헤지 {FX_TARGETS_LOW['환헤지']:.0f}%"},
+        ])
+
+        def highlight_current_fx_rule(row):
+            label = str(row["환율 범위"])
+            active = (
+                (current_fx > 1400 and label == "1400 초과")
+                or (1330 <= current_fx <= 1400 and label == "1330 이상 ~ 1400 이하")
+                or (current_fx < 1330 and label == "1330 미만")
+            )
+            if active:
+                return ["color: #1976d2; font-weight: 700"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            fx_logic_df.style.apply(highlight_current_fx_rule, axis=1),
+            use_container_width=True,
+            hide_index=True,
+        )
 
         fx_config = {
             "세액공제 O": ["S&P500", "나스닥100"],
@@ -936,6 +973,7 @@ try:
     with tabs[5]:
         st.subheader("⚖️ 카테고리별 리밸런싱")
         st.info("CSV의 현금은 진짜 현금으로 유지하고, KOFR는 별도 목표자산으로 계산합니다. 즉 현금은 집행 대기 자금이며 리밸런싱 목표 비중의 일부로 보지 않습니다.")
+        st.caption(f"현재 환율 {current_fx:,.2f}원 기준으로 주식형 해외자산(S&P500/나스닥100/다우존스)은 환노출 {fx_target['환노출']:.0f}% / 환헤지 {fx_target['환헤지']:.0f}% 권장 비율을 리밸런싱 계산에 반영합니다.")
 
         target_rows = []
         for cat_name in CATEGORY_ORDER:
@@ -1003,3 +1041,4 @@ try:
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
+
