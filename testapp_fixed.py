@@ -66,8 +66,8 @@ DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.92], "y": [0.08, 0.92]}  # 환율 목표
 
 # 환율관리 탭 도넛 색상
 FX_COLOR_MAP = {
-    "환노출": "#1f77b4",  # 파란색 계열
-    "환헤지": "#ff7f0e",  # 주황색 계열
+    "환노출": "#ff7f0e",  # 파란색 계열
+    "환헤지": "#1f77b4",  # 주황색 계열
 }
 
 DISPLAY_WEIGHT_THRESHOLD = 0.1
@@ -739,7 +739,7 @@ try:
         display_weight_threshold = st.number_input("비중 표시 최소값(%)", min_value=0.0, value=float(DISPLAY_WEIGHT_THRESHOLD), step=0.1)
 
     st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
-    tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리 분석", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
+    tabs = st.tabs(["📊 종목 상세", "🍩 전체 비중", "🏦 카테고리", "💼 계좌별", "🌎 환율관리", "⚖️ 리밸런싱"])
 
     # 1. 종목 상세
     with tabs[0]:
