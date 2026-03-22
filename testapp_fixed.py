@@ -49,13 +49,13 @@ FX_TARGETS_LOW = {"환노출": 80, "환헤지": 20}
 
 # 수동 조절용
 DONUT_OUTER_OPACITY = 0.50
-DONUT_OVERALL_HEIGHT = 460   # 전체/카테고리 도넛 높이
-DONUT_FX_HEIGHT = 340        # 환율 도넛 높이
+DONUT_OVERALL_HEIGHT = 400   # 전체/카테고리 도넛 높이
+DONUT_FX_HEIGHT = 320        # 환율 도넛 높이
 
 # 모바일 겹침 완화용 여백/범례 설정
-MOBILE_DONUT_TOP_MARGIN = 95
-MOBILE_DONUT_BOTTOM_MARGIN = 40
-MOBILE_LEGEND_Y = 1.10
+MOBILE_DONUT_TOP_MARGIN = 120
+MOBILE_DONUT_BOTTOM_MARGIN = 95
+MOBILE_LEGEND_Y = -0.14
 
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
@@ -89,7 +89,9 @@ st.markdown(
     .stDataFrame div { font-size: 11px !important; }
     div[data-testid="stTabs"] { margin-top: 0.75rem !important; }
     div[data-testid="stTabs"] button { padding-top: 0.6rem !important; }
-    .js-plotly-plot .plotly .gtitle { transform: translateY(8px); }
+    .js-plotly-plot .plotly .gtitle { transform: translateY(2px); }
+    .js-plotly-plot { margin-bottom: 18px !important; }
+    [data-testid="stPlotlyChart"] { padding-top: 8px !important; padding-bottom: 8px !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -274,16 +276,16 @@ def make_dual_donut(
         )
     )
     fig.update_layout(
-        title=dict(text=title, y=0.96),
+        title=dict(text=title, y=0.98),
         height=height,
-        margin=dict(l=10, r=10, t=MOBILE_DONUT_TOP_MARGIN, b=MOBILE_DONUT_BOTTOM_MARGIN),
+        margin=dict(l=10, r=10, t=120, b=95),
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=MOBILE_LEGEND_Y,
+            yanchor="top",
+            y=-0.14,
             xanchor="center",
             x=0.5,
-            tracegroupgap=6,
+            tracegroupgap=8,
         ),
     )
     return fig
@@ -1064,4 +1066,5 @@ try:
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
+
 
