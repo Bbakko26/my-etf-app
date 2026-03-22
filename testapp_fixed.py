@@ -971,9 +971,9 @@ try:
                     if sub.empty:
                         continue
                     st.markdown(f"### {cat_name}")
-                    display_cols = ["계좌명", "자산군_표시", "약식종목명", "종목코드", "목표금액", "현재금액", "현재가", "조정수량", "권장환형태", "권장환비율"]
+                    display_cols = ["계좌명", "자산군_표시", "약식종목명", "종목코드", "목표금액", "현재금액", "현재가", "조정수량"]
                     st.dataframe(
-                        sub[display_cols].style.applymap(
+                        sub[[c for c in display_cols if c in sub.columns]].style.applymap(
                             lambda x: "color: #d32f2f" if pd.notna(x) and isinstance(x, (int, float)) and x > 0 else "color: #1976d2",
                             subset=["조정수량"],
                         ).format({
