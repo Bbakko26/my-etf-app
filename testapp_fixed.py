@@ -189,18 +189,16 @@ def style_table(df, cols, show_all=False, min_weight=DISPLAY_WEIGHT_THRESHOLD):
     return view.style.format(format_rules)
 
 
-def highlight_underweight_rows(df_view):
-    def _row_style(row):
-        if "비중" in row.index and "목표" in row.index:
-            try:
-                current_weight = float(row["비중"])
-                target_weight = float(row["목표"])
-                if current_weight < target_weight:
-                    return ["color: #d32f2f; font-weight: 600"] * len(row)
-            except Exception:
-                pass
-        return [""] * len(row)
-    return df_view.apply(_row_style, axis=1)
+def highlight_underweight_rows(row):
+    if "비중" in row.index and "목표" in row.index:
+        try:
+            current_weight = float(row["비중"])
+            target_weight = float(row["목표"])
+            if current_weight < target_weight:
+                return ["color: #d32f2f; font-weight: 600"] * len(row)
+        except Exception:
+            pass
+    return [""] * len(row)
 
 
 def make_dual_donut(
@@ -1042,5 +1040,3 @@ try:
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
-
-
