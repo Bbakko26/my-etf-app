@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import FinanceDataReader as fdr
@@ -50,20 +49,20 @@ FX_TARGETS_LOW = {"환노출": 80, "환헤지": 20}
 
 # 수동 조절용
 DONUT_OUTER_OPACITY = 0.50
-DONUT_OVERALL_HEIGHT = 400   # 전체/카테고리 도넛 높이
-DONUT_FX_HEIGHT = 320        # 환율 도넛 높이
+DONUT_OVERALL_HEIGHT = 360   # 전체/카테고리 도넛 높이
+DONUT_FX_HEIGHT = 300        # 환율 도넛 높이
 
 # 모바일 겹침 완화용 여백/범례 설정
-MOBILE_DONUT_TOP_MARGIN = 120
-MOBILE_DONUT_BOTTOM_MARGIN = 95
-MOBILE_LEGEND_Y = -0.14
+MOBILE_DONUT_TOP_MARGIN = 78
+MOBILE_DONUT_BOTTOM_MARGIN = 52
+MOBILE_LEGEND_Y = -0.08
 
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
-DONUT_CURRENT_DOMAIN = {"x": [0.20, 0.80], "y": [0.20, 0.80]}   # 현재 도넛
-DONUT_TARGET_DOMAIN = {"x": [0.06, 0.94], "y": [0.06, 0.94]}     # 목표 도넛
-DONUT_FX_CURRENT_DOMAIN = {"x": [0.22, 0.78], "y": [0.22, 0.78]} # 환율 현재 도넛
-DONUT_FX_TARGET_DOMAIN = {"x": [0.08, 0.92], "y": [0.08, 0.92]}  # 환율 목표 도넛
+DONUT_CURRENT_DOMAIN = {"x": [0.11, 0.89], "y": [0.16, 0.90]}   # 현재 도넛
+DONUT_TARGET_DOMAIN = {"x": [0.05, 0.95], "y": [0.10, 0.96]}     # 목표 도넛
+DONUT_FX_CURRENT_DOMAIN = {"x": [0.13, 0.87], "y": [0.18, 0.90]} # 환율 현재 도넛
+DONUT_FX_TARGET_DOMAIN = {"x": [0.06, 0.94], "y": [0.12, 0.96]}  # 환율 목표 도넛
 
 # 환율관리 탭 도넛 색상
 FX_COLOR_MAP = {
@@ -99,8 +98,9 @@ st.markdown(
         border-radius: 10px 10px 0 0 !important;
     }
     .js-plotly-plot .plotly .gtitle { transform: translateY(2px); }
-    .js-plotly-plot { margin-bottom: 18px !important; }
-    [data-testid="stPlotlyChart"] { padding-top: 8px !important; padding-bottom: 8px !important; }
+    .js-plotly-plot { margin-bottom: 14px !important; overflow: hidden !important; }
+    [data-testid="stPlotlyChart"] { padding-top: 4px !important; padding-bottom: 4px !important; overflow: hidden !important; }
+    [data-testid="stPlotlyChart"] > div { overflow: hidden !important; }
     .block-container {
         padding-top: 1.0rem !important;
         padding-bottom: 1.5rem !important;
@@ -127,6 +127,7 @@ st.markdown(
         padding: 14px 14px 10px 14px;
         margin: 10px 0 14px 0;
         box-shadow: 0 10px 24px rgba(0,0,0,0.14);
+        overflow: hidden !important;
     }
     .app-card-title {
         font-size: 1rem;
@@ -348,14 +349,14 @@ def make_dual_donut(
     fig.update_layout(
         title=dict(text=title, y=0.98),
         height=height,
-        margin=dict(l=10, r=10, t=120, b=95),
+        margin=dict(l=6, r=6, t=MOBILE_DONUT_TOP_MARGIN, b=MOBILE_DONUT_BOTTOM_MARGIN),
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.14,
+            y=MOBILE_LEGEND_Y,
             xanchor="center",
             x=0.5,
-            tracegroupgap=8,
+            tracegroupgap=6,
         ),
     )
     return fig
@@ -921,6 +922,7 @@ try:
             ),
             use_container_width=True,
             key="overall_dual_donut",
+            config={"displayModeBar": False, "scrollZoom": False},
         )
 
         sort_targets = total_target.copy()
@@ -968,6 +970,7 @@ try:
                 ),
                 use_container_width=True,
                 key=f"category_dual_donut_{cat_name}",
+                config={"displayModeBar": False, "scrollZoom": False},
             )
 
             detail = cat_df.copy()
@@ -1083,6 +1086,7 @@ try:
                     ),
                     use_container_width=True,
                     key=f"fx_dual_donut_{cat_name}_{target_asset}",
+                    config={"displayModeBar": False, "scrollZoom": False},
                 )
             close_card()
             st.markdown("---")
