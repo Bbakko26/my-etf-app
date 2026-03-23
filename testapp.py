@@ -48,14 +48,14 @@ FX_TARGETS_MID = {"환노출": 50, "환헤지": 50}
 FX_TARGETS_LOW = {"환노출": 80, "환헤지": 20}
 
 # 수동 조절용
-DONUT_OUTER_OPACITY = 0.50
-DONUT_OVERALL_HEIGHT = 600   # 전체/카테고리 도넛 높이
-DONUT_FX_HEIGHT = 500        # 환율 도넛 높이
+DONUT_OUTER_OPACITY = 0.40
+DONUT_OVERALL_HEIGHT = 550  # 전체/카테고리 도넛 높이
+DONUT_FX_HEIGHT = 550        # 환율 도넛 높이
 
 # 모바일 겹침 완화용 여백/범례 설정
-MOBILE_DONUT_TOP_MARGIN = 120
-MOBILE_DONUT_BOTTOM_MARGIN = 95
-MOBILE_LEGEND_Y = -0.14
+MOBILE_DONUT_TOP_MARGIN = -20
+MOBILE_DONUT_BOTTOM_MARGIN = -20
+MOBILE_LEGEND_Y = 0.1
 
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
@@ -85,13 +85,90 @@ st.markdown(
     """
     <style>
     html, body, [class*="css"] { font-size: 12px !important; }
-    h1 { font-size: 1.2rem !important; margin-bottom: 0.5rem !important; }
+    .stApp {
+        background: linear-gradient(180deg, #07101f 0%, #0b1220 100%);
+    }
+    h1, h2, h3 { letter-spacing: -0.02em !important; }
+    h1 { font-size: 1.25rem !important; margin-bottom: 0.35rem !important; }
+    h2 { font-size: 1.10rem !important; }
+    h3 { font-size: 1.00rem !important; }
+
+    .block-container {
+        padding-top: 1.0rem !important;
+        padding-bottom: 1.5rem !important;
+        max-width: 980px !important;
+    }
+
     .stDataFrame div { font-size: 11px !important; }
-    div[data-testid="stTabs"] { margin-top: 0.75rem !important; }
-    div[data-testid="stTabs"] button { padding-top: 0.6rem !important; }
-    .js-plotly-plot .plotly .gtitle { transform: translateY(2px); }
-    .js-plotly-plot { margin-bottom: 18px !important; }
-    [data-testid="stPlotlyChart"] { padding-top: 8px !important; padding-bottom: 8px !important; }
+
+    div[data-testid="stTabs"] { margin-top: 0.65rem !important; }
+    div[data-testid="stTabs"] button {
+        padding-top: 0.55rem !important;
+        padding-bottom: 0.55rem !important;
+        border-radius: 10px 10px 0 0 !important;
+    }
+
+    div[data-testid="stMetric"] {
+        background: rgba(17, 24, 39, 0.88);
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        border-radius: 16px;
+        padding: 14px 14px 10px 14px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.16);
+    }
+    div[data-testid="stMetricLabel"] { color: #94a3b8 !important; }
+    div[data-testid="stMetricValue"] { font-weight: 750 !important; }
+
+    div[data-testid="stExpander"] {
+        border: 1px solid rgba(148,163,184,0.12) !important;
+        border-radius: 14px !important;
+        background: rgba(15,23,42,0.75) !important;
+    }
+
+    .app-card {
+        background: rgba(15, 23, 42, 0.76);
+        border: 1px solid rgba(148, 163, 184, 0.10);
+        border-radius: 18px;
+        padding: 14px 14px 10px 14px;
+        margin: 10px 0 14px 0;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.14);
+        overflow: hidden !important;
+    }
+    .app-card-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 2px;
+    }
+    .app-card-caption {
+        color: #94a3b8;
+        font-size: 0.82rem;
+        margin-bottom: 8px;
+    }
+    .app-hero {
+        background: linear-gradient(135deg, rgba(30,41,59,0.96), rgba(15,23,42,0.96));
+        border: 1px solid rgba(148,163,184,0.12);
+        border-radius: 20px;
+        padding: 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 14px 30px rgba(0,0,0,0.16);
+    }
+    .app-hero-title { color: #94a3b8; font-size: 0.82rem; margin-bottom: 4px; }
+    .app-hero-value {
+        font-size: 1.9rem;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        margin-bottom: 2px;
+    }
+    .app-hero-sub { color: #cbd5e1; font-size: 0.86rem; }
+
+    .js-plotly-plot { margin-bottom: 6px !important; overflow: hidden !important; }
+    [data-testid="stPlotlyChart"] {
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stPlotlyChart"] > div {
+        overflow: hidden !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -100,6 +177,14 @@ st.markdown(
 # -----------------------------
 # 유틸
 # -----------------------------
+def open_card(title=None, caption=None):
+    title_html = f'<div class="app-card-title">{title}</div>' if title else ""
+    caption_html = f'<div class="app-card-caption">{caption}</div>' if caption else ""
+    st.markdown(f'<div class="app-card">{title_html}{caption_html}', unsafe_allow_html=True)
+
+def close_card():
+    st.markdown("</div>", unsafe_allow_html=True)
+
 def normalize_asset_group(value):
     raw = "" if pd.isna(value) else str(value).strip()
     return DISPLAY_TO_CANONICAL.get(raw, raw)
@@ -276,16 +361,21 @@ def make_dual_donut(
         )
     )
     fig.update_layout(
-        title=dict(text=title, y=0.98),
+        title=dict(text=title, y=0.98) if title else None,
         height=height,
-        margin=dict(l=10, r=10, t=120, b=95),
+        margin=dict(
+            l=6,
+            r=6,
+            t=0 if not title else max(MOBILE_DONUT_TOP_MARGIN, 0),
+            b=0 if not title else max(MOBILE_DONUT_BOTTOM_MARGIN, 0),
+        ),
         legend=dict(
             orientation="h",
-            yanchor="top",
-            y=-0.14,
+            yanchor="bottom",
+            y=MOBILE_LEGEND_Y,
             xanchor="center",
             x=0.5,
-            tracegroupgap=8,
+            tracegroupgap=6,
         ),
     )
     return fig
@@ -720,11 +810,22 @@ try:
     total_target = build_overall_target_mix(asset_df)
 
     st.title("💰 Family Portfolio")
-    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
+    st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+    hero_pct = (total_profit / total_seed * 100) if total_seed > 0 else 0
+    hero_delta_color = "#4ade80" if total_profit >= 0 else "#60a5fa"
+    st.markdown(
+        f"""
+        <div class="app-hero">
+            <div class="app-hero-title">누적 수익</div>
+            <div class="app-hero-value">{hero_pct:.2f}%</div>
+            <div class="app-hero-sub" style="color:{hero_delta_color};">{total_profit:+,.0f}원</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns(2)
     c1.metric("총 투입원금", f"{total_seed:,.0f}원")
     c2.metric("현재 자산", f"{total_eval:,.0f}원")
-    c3.metric("누적 수익", f"{(total_profit / total_seed * 100) if total_seed > 0 else 0:.2f}%", f"{total_profit:+,.0f}원")
 
     daily_alerts = build_daily_alerts(asset_df, drop_threshold=-2.5)
     if daily_alerts:
@@ -743,6 +844,7 @@ try:
 
     # 1. 종목 상세
     with tabs[0]:
+        open_card("📊 종목 상세", "보유 종목 요약과 선택 종목 차트")
         sum_df = (
             asset_df.groupby(["자산군", "약식종목명", "종목코드", "종목명"], dropna=False)
             .agg({"보유수량": "sum", "매수금액": "sum", "평가금액": "sum"})
@@ -799,24 +901,28 @@ try:
                 st.plotly_chart(
                     make_price_chart(hist_df, avg_price=avg_price, title=f"{selected_name} 최근 120일 차트"),
                     use_container_width=True,
+                    key=f"price_chart_{sel_code}_{selected_name}",
+                    config={"displayModeBar": False, "scrollZoom": False},
                 )
             else:
                 st.info("120일 가격 차트를 불러오지 못했습니다.")
 
-        st.dataframe(
-            style_table(
-                detail_df,
-                ["계좌명", "종목코드", "보유수량", "매수평단", "현재가", "평가금액", "수익률"],
-                show_all=show_all_rows,
-                min_weight=display_weight_threshold,
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+        with st.expander("계좌별 상세 보기", expanded=False):
+            st.dataframe(
+                style_table(
+                    detail_df,
+                    ["계좌명", "종목코드", "보유수량", "매수평단", "현재가", "평가금액", "수익률"],
+                    show_all=show_all_rows,
+                    min_weight=display_weight_threshold,
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+        close_card()
 
     # 2. 전체 비중
     with tabs[1]:
-        st.subheader("📊 전체 포트폴리오 상태")
+        open_card("📊 전체 포트폴리오 상태", "현재 비중과 목표 비중을 비교")
         grp_df = asset_df.groupby("자산군", dropna=False)["평가금액"].sum().reset_index()
         grp_df["자산군_표시"] = grp_df["자산군"].apply(display_asset_group)
         grp_df["비중"] = grp_df["평가금액"] / total_eval * 100.0 if total_eval > 0 else 0.0
@@ -829,7 +935,7 @@ try:
                 "비중",
                 "자산군_표시",
                 total_target,
-                "현재 비중 vs 목표 비중",
+                "",
                 DONUT_OVERALL_HEIGHT,
                 DONUT_CURRENT_DOMAIN,
                 DONUT_TARGET_DOMAIN,
@@ -852,6 +958,7 @@ try:
             use_container_width=True,
             hide_index=True,
         )
+        close_card()
 
     # 3. 카테고리 분석
     with tabs[2]:
@@ -860,7 +967,7 @@ try:
             if cat_df.empty:
                 continue
 
-            st.subheader(f"🏦 {cat_name}")
+            open_card(f"🏦 {cat_name}", "현재 비중, 목표 비중, 계좌별 상세")
             cat_total = float(cat_df["평가금액"].sum())
             cat_grp = cat_df.groupby("자산군", dropna=False)["평가금액"].sum().reset_index()
             cat_grp["자산군_표시"] = cat_grp["자산군"].apply(display_asset_group)
@@ -874,7 +981,7 @@ try:
                     "비중",
                     "자산군_표시",
                     {k: v * 100 for k, v in CATEGORY_TARGETS[cat_name].items()},
-                    f"{cat_name} 현재 비중 vs 목표 비중",
+                    "" ,
                     DONUT_OVERALL_HEIGHT,
                     DONUT_CURRENT_DOMAIN,
                     DONUT_TARGET_DOMAIN,
@@ -902,6 +1009,7 @@ try:
                 use_container_width=True,
                 hide_index=True,
             )
+            close_card()
             st.markdown("---")
 
     # 4. 계좌별
@@ -910,7 +1018,7 @@ try:
             acc_df = asset_df[asset_df["계좌명"] == acc_name].copy()
             if acc_df.empty:
                 continue
-            st.markdown(f"### 🏦 {acc_name}")
+            open_card(f"🏦 {acc_name}", "계좌별 보유 자산 상세")
             acc_total = float(acc_df["평가금액"].sum())
             acc_df["비중"] = acc_df["평가금액"] / acc_total * 100.0 if acc_total > 0 else 0.0
             acc_df["자산군_표시"] = acc_df["자산군"].apply(display_asset_group)
@@ -930,10 +1038,11 @@ try:
                 use_container_width=True,
                 hide_index=True,
             )
+            close_card()
 
     # 5. 환율관리
     with tabs[4]:
-        st.subheader(f"🌎 실시간 환율: {current_fx:,.2f}원")
+        open_card(f"🌎 실시간 환율: {current_fx:,.2f}원", "현재 환율 구간과 대응 원칙")
         fx_target = FX_TARGETS_HIGH if current_fx > 1400 else (FX_TARGETS_LOW if current_fx < 1330 else FX_TARGETS_MID)
 
         fx_logic_df = pd.DataFrame([
@@ -958,6 +1067,7 @@ try:
             use_container_width=True,
             hide_index=True,
         )
+        close_card()
 
         fx_config = {
             "세액공제 O": ["S&P500", "나스닥100"],
@@ -966,7 +1076,7 @@ try:
         }
 
         for cat_name in CATEGORY_ORDER:
-            st.markdown(f"### 🏦 {cat_name}")
+            open_card(f"🏦 {cat_name}", "자산별 환노출 / 환헤지 비중 확인")
             for target_asset in fx_config.get(cat_name, []):
                 fx_df = asset_df[(asset_df["계좌카테고리"] == cat_name) & (asset_df["자산군"] == target_asset)].copy()
                 if fx_df.empty:
@@ -982,7 +1092,7 @@ try:
                         "비중",
                         "구분",
                         fx_target,
-                        f"{cat_name} - {display_asset_group(target_asset)} 환노출/헤지",
+                        "" ,
                         DONUT_FX_HEIGHT,
                         DONUT_FX_CURRENT_DOMAIN,
                         DONUT_FX_TARGET_DOMAIN,
@@ -991,11 +1101,12 @@ try:
                     ),
                     use_container_width=True,
                 )
+            close_card()
             st.markdown("---")
 
     # 6. 리밸런싱
     with tabs[5]:
-        st.subheader("⚖️ 카테고리별 리밸런싱")
+        open_card("⚖️ 카테고리별 리밸런싱", "목표 비중과 현재 비중을 기준으로 조정 수량 계산")
         st.info("즉 현금은 집행 대기 자금이며 리밸런싱 목표 비중의 일부로 보지 않고, 기존 보유 종목의 리밸런싱을 진행합니다.")
         st.caption(f"현재 환율 {current_fx:,.2f}원 기준으로 주식형 해외자산(S&P500/나스닥100/다우존스)은 환노출 {fx_target['환노출']:.0f}% / 환헤지 {fx_target['환헤지']:.0f}% 권장 비율을 리밸런싱 계산에 반영합니다.")
 
@@ -1063,6 +1174,7 @@ try:
                     use_container_width=True,
                     hide_index=True,
                 )
+        close_card()
 
 except Exception as e:
     st.error(f"🚨 시스템 오류: {e}")
