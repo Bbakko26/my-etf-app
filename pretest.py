@@ -55,7 +55,7 @@ DONUT_FX_HEIGHT = 550        # 환율 도넛 높이
 # 모바일 겹침 완화용 여백/범례 설정
 MOBILE_DONUT_TOP_MARGIN = -20
 MOBILE_DONUT_BOTTOM_MARGIN = -20
-MOBILE_LEGEND_Y = 0.05
+MOBILE_LEGEND_Y = 0.1
 
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
@@ -941,6 +941,8 @@ try:
                 DONUT_TARGET_DOMAIN,
             ),
             use_container_width=True,
+       ,
+            key="plotly_chart_auto_0"
         )
 
         sort_targets = total_target.copy()
@@ -987,6 +989,8 @@ try:
                     DONUT_TARGET_DOMAIN,
                 ),
                 use_container_width=True,
+           ,
+                key="plotly_chart_auto_1"
             )
 
             detail = cat_df.copy()
@@ -1100,6 +1104,8 @@ try:
                         target_color_map=FX_COLOR_MAP,
                     ),
                     use_container_width=True,
+               ,
+                    key="plotly_chart_auto_2"
                 )
             close_card()
             st.markdown("---")
