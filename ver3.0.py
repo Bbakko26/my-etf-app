@@ -300,7 +300,7 @@ def make_dual_donut(
     height,
     current_domain,
     target_domain,
-    current_hole=0.48,
+    current_hole=0.42,
     target_hole=0.90,
     current_color_map=None,
     target_color_map=None,
