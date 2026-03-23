@@ -9,6 +9,9 @@ except Exception:
 
 st.set_page_config(page_title="Family Portfolio", layout="wide")
 
+if "active_view" not in st.session_state:
+    st.session_state.active_view = "📊 종목 상세"
+
 # -----------------------------
 # 설정
 # -----------------------------
