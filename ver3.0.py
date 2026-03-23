@@ -48,8 +48,8 @@ FX_TARGETS_MID = {"환노출": 50, "환헤지": 50}
 FX_TARGETS_LOW = {"환노출": 80, "환헤지": 20}
 
 # 수동 조절용
-DONUT_OUTER_OPACITY = 0.50
-DONUT_OVERALL_HEIGHT = 360   # 전체/카테고리 도넛 높이
+DONUT_OUTER_OPACITY = 0.40
+DONUT_OVERALL_HEIGHT = 600   # 전체/카테고리 도넛 높이
 DONUT_FX_HEIGHT = 300        # 환율 도넛 높이
 
 # 모바일 겹침 완화용 여백/범례 설정
@@ -66,8 +66,8 @@ DONUT_FX_TARGET_DOMAIN = {"x": [0.06, 0.94], "y": [0.12, 0.96]}  # 환율 목표
 
 # 환율관리 탭 도넛 색상
 FX_COLOR_MAP = {
-    "환노출": "#1f77b4",  # 파란색 계열
-    "환헤지": "#ff7f0e",  # 주황색 계열
+    "환노출": "#ff7f0e",  # 주황색 계열
+    "환헤지": "#1f77b4",  # 파란색 계열
 }
 
 DISPLAY_WEIGHT_THRESHOLD = 0.1
@@ -301,7 +301,7 @@ def make_dual_donut(
     current_domain,
     target_domain,
     current_hole=0.48,
-    target_hole=0.72,
+    target_hole=0.80,
     current_color_map=None,
     target_color_map=None,
 ):
