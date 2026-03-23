@@ -49,8 +49,8 @@ FX_TARGETS_LOW = {"환노출": 80, "환헤지": 20}
 
 # 수동 조절용
 DONUT_OUTER_OPACITY = 0.50
-DONUT_OVERALL_HEIGHT = 600   # 전체/카테고리 도넛 높이
-DONUT_FX_HEIGHT = 500        # 환율 도넛 높이
+DONUT_OVERALL_HEIGHT = 450   # 전체/카테고리 도넛 높이
+DONUT_FX_HEIGHT = 450        # 환율 도넛 높이
 
 # 모바일 겹침 완화용 여백/범례 설정
 MOBILE_DONUT_TOP_MARGIN = 120
