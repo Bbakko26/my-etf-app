@@ -49,13 +49,13 @@ FX_TARGETS_LOW = {"환노출": 80, "환헤지": 20}
 
 # 수동 조절용
 DONUT_OUTER_OPACITY = 0.40
-DONUT_OVERALL_HEIGHT = 450   # 전체/카테고리 도넛 높이
-DONUT_FX_HEIGHT = 450        # 환율 도넛 높이
+DONUT_OVERALL_HEIGHT = 550  # 전체/카테고리 도넛 높이
+DONUT_FX_HEIGHT = 550        # 환율 도넛 높이
 
 # 모바일 겹침 완화용 여백/범례 설정
-MOBILE_DONUT_TOP_MARGIN = 20
-MOBILE_DONUT_BOTTOM_MARGIN = 60
-MOBILE_LEGEND_Y = -0.14
+MOBILE_DONUT_TOP_MARGIN = 0
+MOBILE_DONUT_BOTTOM_MARGIN = 0
+MOBILE_LEGEND_Y = 0.1
 
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
