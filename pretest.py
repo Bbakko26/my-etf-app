@@ -941,8 +941,8 @@ try:
                 DONUT_TARGET_DOMAIN,
             ),
             use_container_width=True,
-       ,
-            key="plotly_chart_auto_0"
+            key="overall_dual_donut",
+            config={"displayModeBar": False, "scrollZoom": False},
         )
 
         sort_targets = total_target.copy()
@@ -983,14 +983,14 @@ try:
                     "비중",
                     "자산군_표시",
                     {k: v * 100 for k, v in CATEGORY_TARGETS[cat_name].items()},
-                    "" ,
+                    "",
                     DONUT_OVERALL_HEIGHT,
                     DONUT_CURRENT_DOMAIN,
                     DONUT_TARGET_DOMAIN,
                 ),
                 use_container_width=True,
-           ,
-                key="plotly_chart_auto_1"
+                key=f"category_dual_donut_{cat_name}",
+                config={"displayModeBar": False, "scrollZoom": False},
             )
 
             detail = cat_df.copy()
@@ -1096,7 +1096,7 @@ try:
                         "비중",
                         "구분",
                         fx_target,
-                        "" ,
+                        "",
                         DONUT_FX_HEIGHT,
                         DONUT_FX_CURRENT_DOMAIN,
                         DONUT_FX_TARGET_DOMAIN,
@@ -1104,8 +1104,8 @@ try:
                         target_color_map=FX_COLOR_MAP,
                     ),
                     use_container_width=True,
-               ,
-                    key="plotly_chart_auto_2"
+                    key=f"fx_dual_donut_{cat_name}_{target_asset}",
+                    config={"displayModeBar": False, "scrollZoom": False},
                 )
             close_card()
             st.markdown("---")
