@@ -59,7 +59,7 @@ DONUT_FX_HEIGHT = 550        # 환율 도넛 높이
 # 모바일 겹침 완화용 여백/범례 설정
 MOBILE_DONUT_TOP_MARGIN = -20
 MOBILE_DONUT_BOTTOM_MARGIN = -20
-MOBILE_LEGEND_Y = 0.1
+MOBILE_LEGEND_Y = 0
 
 # 도넛 크기 조절
 # 숫자를 바깥쪽으로 넓히면 도넛이 커지고, 안쪽으로 좁히면 도넛이 작아짐
