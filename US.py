@@ -1278,7 +1278,7 @@ try:
         st.dataframe(monitor_df, use_container_width=True, hide_index=True)
         close_card()
 
-with tabs[5]:
+    with tabs[5]:
         open_card("⚖️ 카테고리별 리밸런싱", "목표 비중과 현재 비중을 기준으로 조정 수량 계산")
         st.info("즉 현금은 집행 대기 자금이며 리밸런싱 목표 비중의 일부로 보지 않고, 기존 보유 종목의 리밸런싱을 진행합니다.")
         st.caption(f"현재 환율 {current_fx:,.2f}원 기준으로 주식형 해외자산(S&P500/나스닥100/다우존스)은 환노출 {fx_target['환노출']:.0f}% / 환헤지 {fx_target['환헤지']:.0f}% 권장 비율을 리밸런싱 계산에 반영합니다.")
